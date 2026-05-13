@@ -1,0 +1,19 @@
+IberisRaidAuction
+Copyright 2026 Iberis (Iberis6501)
+
+This product includes software originally developed by tg123 as
+"RaidLedger" — https://github.com/tg123/RaidLedger
+Licensed under the Apache License, Version 2.0.
+
+Korean variant patterns (UI strings, slash command structure)
+adapted from "RaidLedgerBR" — a Korean community fork of RaidLedger.
+
+Modifications by Iberis include:
+  - Rebranded namespace and slash commands (/ira)
+  - Renamed SavedVariables (IberisRaidAuctionGlobalConfig,
+    IberisRaidAuctionDatabase) and source file prefix (IRA*)
+  - Visual identity changes (title, icon, color)
+  - Additional features and integrations as described in CHANGELOG
+
+The original Apache 2.0 license terms continue to apply to all
+inherited code. See the LICENSE file for the full text.

@@ -1,0 +1,38 @@
+## Interface: 11508, 20505, 30404, 50502, 110200
+## Title: |cff91d7f2IberisRaidAuction|r
+## Title-koKR: |cff91d7f2IberisRaidAuction|r
+## Notes: GDKP raid ledger — forked from RaidLedger by tg123 (Apache 2.0)
+## Notes-koKR: 공격대 GDKP 골드 분배 장부 — RaidLedger 기반
+## Author: Iberis
+## Version: 0.2
+## SavedVariables: IberisRaidAuctionGlobalConfig
+## SavedVariablesPerCharacter: IberisRaidAuctionDatabase
+## IconTexture: Interface\Icons\inv_misc_note_03
+## X-Category: Auction/Economy
+## Category-enUS: Auctions
+## Category-koKR: 경매
+## Category-deDE: Auktionen
+## Category-esES: Subastas
+## Category-frFR: Ventes
+## Category-itIT: Aste
+## Category-ptBR: Leilões
+## Category-ruRU: Лоты
+## Category-zhCN: 拍卖
+## Category-zhTW: 拍賣
+## X-License: Apache License 2.0
+
+lib\LibStub\LibStub.lua
+lib\CallbackHandler-1.0\CallbackHandler-1.0.lua
+lib\LibDataBroker-1.1\LibDataBroker-1.1.lua
+lib\LibDeformat-3.0\LibDeformat-3.0.lua
+lib\LibDBIcon-1.0\LibDBIcon-1.0.lua
+lib\lib-st\Core.lua
+
+IRALocale.lua
+IRAUtil.lua
+IRAEvent.lua
+
+IRAData.lua
+IRAGui.lua
+
+IRACmd.lua
