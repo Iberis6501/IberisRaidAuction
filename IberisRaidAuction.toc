@@ -7,7 +7,7 @@
 ## Version: 0.2
 ## SavedVariables: IberisRaidAuctionGlobalConfig
 ## SavedVariablesPerCharacter: IberisRaidAuctionDatabase
-## IconTexture: Interface\Icons\inv_misc_note_03
+## IconTexture: Interface\Icons\INV_Misc_Coin_01
 ## X-Category: Auction/Economy
 ## Category-enUS: Auctions
 ## Category-koKR: 경매
@@ -26,13 +26,19 @@ lib\CallbackHandler-1.0\CallbackHandler-1.0.lua
 lib\LibDataBroker-1.1\LibDataBroker-1.1.lua
 lib\LibDeformat-3.0\LibDeformat-3.0.lua
 lib\LibDBIcon-1.0\LibDBIcon-1.0.lua
+lib\LibSharedMedia-3.0\lib.xml
 lib\lib-st\Core.lua
 
 IRALocale.lua
 IRAUtil.lua
 IRAEvent.lua
 
+IRATheme.lua
 IRAData.lua
 IRAGui.lua
 
 IRACmd.lua
+
+IRAOptions.lua
+IRATest.lua
+IRACountdown.lua

@@ -69,19 +69,61 @@ end
 local CRLF = ADDONSELF.CRLF
 
 function GUI:UpdateSummary()
+    if not self.summaryLabel then return end
     local profit, avg, revenue, expense = self:Summary()
 
-    self.summaryLabel:SetText(L["Revenue"] .. " " .. GetMoneyString(revenue) .. CRLF
-                           .. L["Expense"] .. " " .. GetMoneyString(expense) .. CRLF
-                           .. L["Net Profit"] .. " " .. GetMoneyString(profit) .. CRLF
-                           .. L["Per Member"] .. " " .. GetMoneyString(avg) .. CRLF
-                           .. L["Per Party credit"] .. " " .. GetMoneyString(avg*5) .. "/5" .. CRLF
-                           .. L["Per Party credit"] .. " " .. GetMoneyString(avg*4) .. "/4" .. CRLF
-                           .. L["Per Party credit"] .. " " .. GetMoneyString(avg*3) .. "/3"
-                        )
-    -- checkf는 더 이상 사용하지 않음 (GUI.roundingLevel 사용)
-    checkTrade = self.checkTbutton:GetChecked()
+    -- 수동(+수익)만 직접 합산
+    local ledger = Database:GetCurrentLedger()
+    local manualRevenue = 0
+    local beneficiaries = {}
+    for _, item in pairs(ledger.items or {}) do
+        if item.type == "CREDIT" and item.cost and item.cost > 0
+                and (item.costtype == nil or item.costtype == "GOLD") then
+            if not (item.detail and item.detail.item) then
+                manualRevenue = manualRevenue + item.cost * 10000
+            end
+            -- 득자 = 자동 캡처 전리품 받은 사람만 (수동 +수익 받은 기부자는 제외)
+            if item.beneficiary and item.beneficiary ~= "" and item.noBeneficiary ~= true
+                    and item.detail and item.detail.item then
+                beneficiaries[item.beneficiary] = true
+            end
+        end
+    end
+    local beneficiaryCount = 0
+    for _ in pairs(beneficiaries) do beneficiaryCount = beneficiaryCount + 1 end
 
+    local autoRevenue  = (revenue or 0) - manualRevenue
+    local distribution = profit or 0
+    local fmt = ADDONSELF.GetMoneyStringL or GetMoneyString
+
+    -- 분배는 항상 골드 단위 floor (사용자 손해 방지)
+    local floorNum   = math.floor((avg or 0) / 10000) * 10000
+    local partyMoney = floorNum * 5
+    local party4     = floorNum * 4
+    local party3     = floorNum * 3
+    local party2     = floorNum * 2
+
+    local splitCount = self:GetSplitNumber() or 0
+
+    self.summaryLabel:SetText(
+        "아이템 " .. fmt(autoRevenue, true)
+        .. " + 수익 " .. fmt(manualRevenue, true)
+        .. " - 지출 " .. fmt(expense or 0, true)
+        .. " = 분배금 " .. fmt(distribution, true)
+        .. CRLF
+        .. "개인당 " .. fmt(floorNum, true)
+        .. " 파티당 " .. fmt(partyMoney, true)
+        .. " 4명당 " .. fmt(party4, true)
+        .. " 3명당 " .. fmt(party3, true)
+        .. " 2명당 " .. fmt(party2, true)
+    )
+
+    -- 분배 인원 라벨도 같이 갱신 (득자 카운트 변동)
+    if self.splitLabel then
+        self.splitLabel:SetText(L["Split into (Current %d)"]:format(GetRosterNumber(), beneficiaryCount))
+    end
+
+    checkTrade = self.checkTbutton:GetChecked()
 end
 
 function GUI:GetSplitNumber()
@@ -407,36 +449,18 @@ function GUI:Init()
 
     local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     f:SetWidth(650)
-    f:SetHeight(550)
-    f:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        tile = false,
-        tileSize = 32,
-        edgeSize = 1,
-        insets = {left = 0, right = 0, top = 0, bottom = 0}
-    })
-
-    f:SetBackdropColor(0, 0, 0)
+    f:SetHeight(705)
+    ADDONSELF.theme:ApplyFrame(f)
     f:SetPoint("CENTER", 0, 0)
     f:SetToplevel(true)
     f:EnableMouse(true)
 
-    -- 추가 배경: 아래쪽으로 50px 더 확장
+    -- 추가 배경: 아래쪽으로 50px 더 확장 (resize handle 영역)
     local extraBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
     extraBg:SetWidth(650)
     extraBg:SetHeight(50)
     extraBg:SetPoint("TOP", f, "BOTTOM", 0, 0)
-    extraBg:SetBackdrop({
-        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-        tile = false,
-        tileSize = 32,
-        edgeSize = 1,
-        insets = {left = 0, right = 0, top = 0, bottom = 0}
-    })
-    extraBg:SetBackdropColor(0, 0, 0)
-    extraBg:SetBackdropBorderColor(0.3, 0.3, 0.3, 1.0)
+    ADDONSELF.theme:ApplyFrame(extraBg)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
@@ -454,54 +478,52 @@ function GUI:Init()
 
     self.mainframe = f
 
-    -- UI 스케일 슬라이더
+    -- 좌측 상단 사인
     do
-        local scaleSlider = CreateFrame("Slider", "IberisRaidAuctionScaleSlider", f, "OptionsSliderTemplate")
-        scaleSlider:SetWidth(100)
-        scaleSlider:SetHeight(16)
-        scaleSlider:SetPoint("TOPRIGHT", f, -60, -8) -- 최소화 버튼 왼쪽에 위치
+        local sig = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        sig:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
+        sig:SetText("|cff91d7f2IberisRaidAuction|r  |cff909090made by 서약선|r")
+    end
 
-        -- 슬라이더 값 설정 (0.7 ~ 1.5)
-        scaleSlider:SetMinMaxValues(0.7, 1.5)
-        scaleSlider:SetValueStep(0.02)  -- 더 작은 단위로 부드럽게
-
-        -- 저장된 스케일 값 불러오기
+    -- 우하단 그립 드래그 = 전체 scale 변경 (균일 비율, 자식 위젯 레이아웃 영향 없음)
+    do
         local savedScale = Database:GetGlobalConfigOrDefault("uiScale", 1.0)
-        scaleSlider:SetValue(savedScale)
         f:SetScale(savedScale)
 
-        -- 슬라이더 텍스트
-        getglobal(scaleSlider:GetName() .. "Low"):SetText("70%")
-        getglobal(scaleSlider:GetName() .. "High"):SetText("150%")
+        local MIN_SCALE, MAX_SCALE = 0.6, 2.0
+        local SENSITIVITY = 200 -- 마우스 200px 이동당 scale 1.0 변화
 
-        -- "UI Scale:" 레이블을 슬라이더 왼쪽에 추가
-        local label = scaleSlider:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        label:SetPoint("RIGHT", scaleSlider, "LEFT", -5, 0)
-        label:SetText("UI Scale:")
+        local rh = CreateFrame("Button", nil, extraBg)
+        rh:SetSize(16, 16)
+        rh:SetPoint("BOTTOMRIGHT", extraBg, "BOTTOMRIGHT", -2, 2)
+        rh:SetFrameStrata("HIGH")
+        rh:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+        rh:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+        rh:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 
-        getglobal(scaleSlider:GetName() .. "Text"):SetText(string.format("%.0f%%", savedScale * 100))
-        getglobal(scaleSlider:GetName() .. "Text"):ClearAllPoints()
-        getglobal(scaleSlider:GetName() .. "Text"):SetPoint("TOP", scaleSlider, "BOTTOM", 0, 3)
-
-        -- 슬라이더 이벤트 (부드러운 업데이트)
-        local updateTimer = nil
-        scaleSlider:SetScript("OnValueChanged", function(self, value)
-            -- 텍스트 즉시 업데이트 (정수 퍼센트)
-            getglobal(self:GetName() .. "Text"):SetText(string.format("%.0f%%", value * 100))
-
-            -- 타이머를 사용하여 연속적인 업데이트 방지
-            if updateTimer then
-                updateTimer:Cancel()
-            end
-
-            updateTimer = C_Timer.NewTimer(0.3, function()
-                f:SetScale(value)
-                Database:SetGlobalConfig("uiScale", value)
+        local startScale, startX
+        rh:SetScript("OnMouseDown", function()
+            startScale = f:GetScale()
+            startX     = select(1, GetCursorPosition())
+            rh:SetScript("OnUpdate", function()
+                local mx = select(1, GetCursorPosition())
+                local delta = (mx - startX) / SENSITIVITY
+                local newScale = math.max(MIN_SCALE, math.min(MAX_SCALE, startScale + delta))
+                f:SetScale(newScale)
             end)
         end)
-
-        -- 슬라이더 스타일 조정 (OptionsSliderTemplate은 SetBackdrop을 지원하지 않음)
-        scaleSlider:SetObeyStepOnDrag(true)
+        rh:SetScript("OnMouseUp", function()
+            rh:SetScript("OnUpdate", nil)
+            Database:SetGlobalConfig("uiScale", f:GetScale())
+        end)
+        rh:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText("창 크기 조절")
+            GameTooltip:AddLine(string.format("드래그: 좌우로 움직여 크기 변경 (%d%% ~ %d%%)", MIN_SCALE * 100, MAX_SCALE * 100), 1, 1, 1)
+            GameTooltip:AddLine(string.format("현재: %d%%", f:GetScale() * 100), 0.7, 0.85, 1)
+            GameTooltip:Show()
+        end)
+        rh:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
     -- 우측 상단 최소화 버튼
@@ -694,6 +716,8 @@ function GUI:Init()
                 GUI.countdownTimer = C_Timer.After(1.0, countStep)
             end
         end)
+
+        countdownBtn:Hide()  -- IRACountdown.lua 의 새 버튼 그룹 사용 — 기존 버튼 폐기
     end
 
     do
@@ -763,6 +787,8 @@ function GUI:Init()
                 SendChatMessage(messages.resume, "RAID_WARNING")
             end
         end)
+
+        stopBtn:Hide()  -- IRACountdown.lua 의 새 버튼 그룹 사용 — 기존 버튼 폐기
     end
 
     local menuFrame = CreateFrame("Frame", nil, UIParent, "UIDropDownMenuTemplate")
@@ -806,9 +832,10 @@ function GUI:Init()
         local t = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
         t:SetWidth(80)
         t:SetHeight(25)
-        t:SetPoint("BOTTOMLEFT", f, 350, 95)
+        t:SetPoint("TOPLEFT", f, "TOPLEFT", 230, -566)
         t:SetAutoFocus(false)
         t:SetMaxLetters(4)
+        ADDONSELF.theme:ApplyEditBox(t)
         -- t:SetNumeric(true)
         t:SetScript("OnTextChanged", function()
             -- 사용자가 입력한 분배 인원 값을 데이터베이스에 저장
@@ -840,20 +867,13 @@ function GUI:Init()
 
     do
         local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        t:SetPoint("BOTTOMLEFT", f, 200, 100)
-        local last = -1
-        local update = function()
-            local n = GetRosterNumber()
-            if n == last then
-                return
-            end
-            t:SetText(L["Split into (Current %d)"]:format(n))
---            self.countEdit:SetText(n)
-            last = GetRosterNumber()
-        end
-        update()
-        RegEvent("GROUP_ROSTER_UPDATE", update)
-        RegEvent("CHAT_MSG_SYSTEM", update) -- fuck above not working
+        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -572)
+        self.splitLabel = t
+        -- 초기 텍스트 (득자 0)
+        t:SetText(L["Split into (Current %d)"]:format(GetRosterNumber(), 0))
+        -- roster 변경 시 UpdateSummary가 splitLabel도 갱신
+        RegEvent("GROUP_ROSTER_UPDATE", function() GUI:UpdateSummary() end)
+        RegEvent("CHAT_MSG_SYSTEM",     function() GUI:UpdateSummary() end)
     end
     --
 
@@ -1014,7 +1034,8 @@ function GUI:Init()
     end
     --]]
 
-    -- Auto loot recording dropdown - 커스텀 드롭다운 (자동 전리품 기록 설정 드롭다운)
+    -- Auto loot recording dropdown — 메인창에서 폐기 (옵션창에서만 설정)
+    if false then
     do
         local container = CreateFrame("Frame", nil, f)
         container:SetWidth(120)
@@ -1171,8 +1192,10 @@ function GUI:Init()
             button:SetText("자동 기록 끔 ▼")
         end
     end
+    end -- end of if false (자동 기록 dropdown 폐기)
 
-    -- Gold/Silver rounding dropdown - 커스텀 드롭다운 (골드/실버 절삭 단위 선택 드롭다운)
+    -- Gold/Silver rounding dropdown — 폐기 (항상 골드 단위 floor)
+    if false then
     do
         local container = CreateFrame("Frame", nil, f)
         container:SetWidth(100)
@@ -1346,6 +1369,7 @@ function GUI:Init()
             button:SetText("절삭 없음 ▼")
         end
     end
+    end -- end of if false (rounding dropdown 폐기)
 
 
     --
@@ -1369,11 +1393,13 @@ function GUI:Init()
         end)
         self.checkTbutton = t
 
+        t:Hide()  -- UI 폐기 — 항상 자동 기록 디폴트
     end
     do
         local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
         t:SetPoint("BOTTOMLEFT", f, 230, 76)
 	t:SetText("거래시 자동으로 기록")
+        t:Hide()  -- 라벨도 폐기
     end
 
     -- 모두 분배 체크박스
@@ -1421,12 +1447,18 @@ function GUI:Init()
         end)
         GUI.checkAllDistributeButton = t  -- 전역 GUI 객체에 저장
         _G.IberisRaidAuctionCheckAllDistributeButton = t  -- 전역 변수에도 저장
+
+        -- UI 폐기 — 항상 "모두 분배" 디폴트 (체크 상태도 강제 true)
+        t:SetChecked(true)
+        Database:SetConfig("checkAllDistribute", true)
+        t:Hide()
     end
     do
         local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
         t:SetPoint("BOTTOMLEFT", f, 370, 76)
         t:SetText(L["Distribute All"])
         GUI.allDistributeLabel = t -- 라벨을 전역 GUI 객체에 저장하여 동적 업데이트 가능
+        t:Hide()  -- 라벨도 폐기
 
         -- 초기 라벨 업데이트 (체크박스 상태에 따라)
         C_Timer.After(0.1, function()
@@ -1435,11 +1467,11 @@ function GUI:Init()
     end
     --
 
-    -- sum 총수익 총지출 최종수입 개인당 골드 파티당 골드
+    -- sum 총수익 총지출 최종수입 개인당 골드 파티당 골드 (분배인원 row 바로 밑, 한 줄)
     do
         local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        t:SetPoint("BOTTOMRIGHT", f, -40, 45)
-        t:SetJustifyH("RIGHT")
+        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -605)
+        t:SetJustifyH("LEFT")
 
         self.summaryLabel = t
     end
@@ -1450,6 +1482,11 @@ function GUI:Init()
         t:SetPoint("TOPLEFT", f, 25, -30)
         t:SetWidth(580)
         t:SetHeight(360)
+
+        -- 스크롤바 테마 (UIPanelScrollFrameTemplate의 자식 슬라이더)
+        if t.ScrollBar then
+            ADDONSELF.theme:ApplyScrollBar(t.ScrollBar)
+        end
 
         local edit = CreateFrame("EditBox", nil, t)
         edit:SetWidth(580)
@@ -1529,51 +1566,17 @@ function GUI:Init()
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(100)
         b:SetHeight(28)
-        b:SetPoint("BOTTOMLEFT", 170, 10)
-        b:SetText(L["Clear"])
+        -- 우측 배열, 거래기록확인 좌측 5px 옆 (width 100, 거래기록확인 좌측 끝 -133 기준)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -138, -524)
+        b:SetText("기록지우기")
 
-        -- 현대적인 버튼 스타일 적용
-        b:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
+        ADDONSELF.theme:ApplyButton(b)
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
-        -- 개별 FontString으로 색상 설정 (다른 애드온과의 충돌 방지)
         local normalFontString = b:GetFontString()
         if normalFontString then
             normalFontString:SetTextColor(1, 1, 1)
         end
-
-        -- 호버 효과
-        b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 눌렸을 때 효과
-        b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-            self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1.0)
-        end)
-
-        b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
 
         b:SetScript("OnClick", function()
             StaticPopup_Show("IBERISRAIDAUCTION_CLEARMSG")
@@ -1587,7 +1590,8 @@ function GUI:Init()
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(60)
         b:SetHeight(28)
-        b:SetPoint("BOTTOMLEFT", 40, 95)
+        -- 아이템 리스트 (TOPLEFT 13, -50, 15행×30=450) 밑 + 반칸(14px) 간격
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -524)
         b:SetText("+" .. L["Credit"])
 
         -- 현대적인 버튼 스타일 적용
@@ -1599,38 +1603,32 @@ function GUI:Init()
             edgeSize = 12,
             insets = { left = 2, right = 2, top = 2, bottom = 2 }
         })
-        b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
+        -- +수익: 진한 하늘색 테두리 + 폰트
+        b:SetBackdropColor(0.05, 0.15, 0.25, 0.9)
+        b:SetBackdropBorderColor(0.1, 0.5, 0.85, 1.0)
 
-        -- 텍스트 색상 흰색으로 설정
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
-        -- 개별 FontString으로 색상 설정 (다른 애드온과의 충돌 방지)
         local normalFontString = b:GetFontString()
         if normalFontString then
-            normalFontString:SetTextColor(1, 1, 1)
+            normalFontString:SetTextColor(0.4, 0.75, 1.0)
         end
 
-        -- 호버 효과
         b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
+            self:SetBackdropColor(0.08, 0.22, 0.35, 0.95)
+            self:SetBackdropBorderColor(0.2, 0.65, 1.0, 1.0)
         end)
-
         b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
+            self:SetBackdropColor(0.05, 0.15, 0.25, 0.9)
+            self:SetBackdropBorderColor(0.1, 0.5, 0.85, 1.0)
         end)
-
-        -- 눌렸을 때 효과
         b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-            self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1.0)
+            self:SetBackdropColor(0.03, 0.10, 0.18, 1.0)
+            self:SetBackdropBorderColor(0.05, 0.35, 0.6, 1.0)
         end)
-
         b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
+            self:SetBackdropColor(0.08, 0.22, 0.35, 0.95)
+            self:SetBackdropBorderColor(0.2, 0.65, 1.0, 1.0)
         end)
 
         b:SetScript("OnClick", function()
@@ -1644,50 +1642,41 @@ function GUI:Init()
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(60)
         b:SetHeight(28)
-        b:SetPoint("BOTTOMLEFT", 100, 95)
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 78, -524)
         b:SetText("+" .. L["Debit"])
 
-        -- 현대적인 버튼 스타일 적용
         b:SetBackdrop({
             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
             edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
+            tile = true, tileSize = 16, edgeSize = 12,
             insets = { left = 2, right = 2, top = 2, bottom = 2 }
         })
-        b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
+        -- +지출: 주황색 테두리 + 폰트
+        b:SetBackdropColor(0.30, 0.18, 0.08, 0.9)
+        b:SetBackdropBorderColor(1.0, 0.55, 0.1, 1.0)
 
-        -- 텍스트 색상 흰색으로 설정
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
-        -- 개별 FontString으로 색상 설정 (다른 애드온과의 충돌 방지)
         local normalFontString = b:GetFontString()
         if normalFontString then
-            normalFontString:SetTextColor(1, 1, 1)
+            normalFontString:SetTextColor(1.0, 0.7, 0.2)
         end
 
-        -- 호버 효과
         b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
+            self:SetBackdropColor(0.40, 0.25, 0.10, 0.95)
+            self:SetBackdropBorderColor(1.0, 0.7, 0.25, 1.0)
         end)
-
         b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
+            self:SetBackdropColor(0.30, 0.18, 0.08, 0.9)
+            self:SetBackdropBorderColor(1.0, 0.55, 0.1, 1.0)
         end)
-
-        -- 눌렸을 때 효과
         b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-            self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1.0)
+            self:SetBackdropColor(0.20, 0.12, 0.05, 1.0)
+            self:SetBackdropBorderColor(0.6, 0.35, 0.05, 1.0)
         end)
-
         b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
+            self:SetBackdropColor(0.40, 0.25, 0.10, 0.95)
+            self:SetBackdropBorderColor(1.0, 0.7, 0.25, 1.0)
         end)
 
         b:SetScript("OnClick", function()
@@ -1700,8 +1689,9 @@ function GUI:Init()
     do
         local container = CreateFrame("Frame", nil, f)
         container:SetWidth(100)
-        container:SetHeight(28)
-        container:SetPoint("BOTTOMLEFT", f, 520, 10)
+        container:SetHeight(22)
+        -- 테스트모드 버튼(TOPRIGHT -60, -7, width 80) 의 좌측 5px 옆
+        container:SetPoint("TOPRIGHT", f, "TOPRIGHT", -145, -7)
 
         -- 메인 버튼
         local button = CreateFrame("Button", nil, container, "BackdropTemplate")
@@ -1756,14 +1746,21 @@ function GUI:Init()
         dropdown:SetBackdropColor(0.15, 0.15, 0.2, 0.95)
         dropdown:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
 
-        -- 메뉴 아이템들
-        local menuItems = {
-            {text = "회색이상", value = 0},
-            {text = "백색이상", value = 1},
-            {text = "녹색이상", value = 2},
-            {text = "파랑이상", value = 3},
-            {text = "에픽이상", value = 4}
+        -- 메뉴 아이템들 (RaidBook 패턴: 고급+ / 희귀+ / 영웅+)
+        local qualityColors = {
+            [2] = "ff1eff00",  -- 고급
+            [3] = "ff0070dd",  -- 희귀
+            [4] = "ffa335ee",  -- 영웅
         }
+        local menuItems = {
+            {text = "고급", value = 2},
+            {text = "희귀", value = 3},
+            {text = "영웅", value = 4},
+        }
+        local function coloredFilterText(val, label)
+            local c = qualityColors[val]
+            return c and ("|c" .. c .. label .. "|r") or label
+        end
 
         -- 메뉴 아이템 생성
         for i, item in ipairs(menuItems) do
@@ -1771,7 +1768,7 @@ function GUI:Init()
             itemButton:SetWidth(116)
             itemButton:SetHeight(22)
             itemButton:SetPoint("TOP", dropdown, "TOP", 0, -(i-1)*24)
-            itemButton:SetText(item.text)
+            itemButton:SetText(coloredFilterText(item.value, item.text))
 
             -- 메뉴 아이템 스타일
             itemButton:SetBackdrop({
@@ -1802,7 +1799,7 @@ function GUI:Init()
 
             -- 클릭 이벤트
             itemButton:SetScript("OnClick", function()
-                button:SetText(item.text .. " ▼")
+                button:SetText(coloredFilterText(item.value, item.text) .. " \226\150\188")
                 dropdown:Hide()
                 Database:SetConfig("filterlevel", item.value)
             end)
@@ -1828,6 +1825,7 @@ function GUI:Init()
         end)
 
         -- 전역 드롭다운 리스트에 추가
+        if not GUI.customDropdowns then GUI.customDropdowns = {} end
         table.insert(GUI.customDropdowns, dropdown)
 
         -- 다른 곳 클릭 시 닫기
@@ -1835,13 +1833,14 @@ function GUI:Init()
             dropdown:Hide()
         end)
 
-        -- 초기값 설정
-        local savedFilterLevel = Database:GetConfigOrDefault("filterlevel", LE_ITEM_QUALITY_UNCOMMON)
-        if savedFilterLevel >= 0 and savedFilterLevel <= 4 then
-            local filterTexts = {"회색이상", "백색이상", "녹색이상", "파랑이상", "에픽이상"}
-            button:SetText((filterTexts[savedFilterLevel + 1] or "에픽이상") .. " ▼")
-        else
-            button:SetText("에픽이상 ▼")
+        -- 초기값 설정 (RaidBook: 2=고급+ / 3=희귀+ / 4=영웅+, 기본 3)
+        local savedFilterLevel = Database:GetConfigOrDefault("filterlevel", 3)
+        if savedFilterLevel < 2 or savedFilterLevel > 4 then savedFilterLevel = 3 end
+        local labelMap = { [2] = "고급", [3] = "희귀", [4] = "영웅" }
+        local label = labelMap[savedFilterLevel] or "희귀"
+        button:SetText(coloredFilterText(savedFilterLevel, label) .. " \226\150\188")
+        if false then
+            button:SetText("legacy")
         end
     end
 
@@ -2572,10 +2571,18 @@ function GUI:Init()
                     checkbox:Show()
                 end),
             }
-        }, 12, 30, nil, f)
+        }, 15, 30, nil, f)
 
         self.lootLogFrame.head:SetHeight(15)
         self.lootLogFrame.frame:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -50)
+
+        -- lib-st 외곽 프레임 + 스크롤바 테마
+        if self.lootLogFrame.frame then
+            ADDONSELF.theme:ApplyFrame(self.lootLogFrame.frame)
+        end
+        if self.lootLogFrame.scrollframe and self.lootLogFrame.scrollframe.ScrollBar then
+            ADDONSELF.theme:ApplyScrollBar(self.lootLogFrame.scrollframe.ScrollBar)
+        end
 
         self.lootLogFrame:RegisterEvents({
             ["OnClick"] = function (rowFrame, cellFrame, data, cols, row, realrow, column, sttable, button, ...)
@@ -2611,59 +2618,19 @@ function GUI:Init()
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(60)  -- 절반으로 크기 축소
         b:SetHeight(28)
-        b:SetPoint("BOTTOMLEFT", 40, 10)
+        -- 우측 배열, 같은 줄 -524 (요약출력 좌측 5px 옆, 아이템 리스트 우측 끝 -13 기준)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -308, -524)
         b:SetText("전체출력")  -- 텍스트 변경
         -- b:SetText(L["Report"] .. " :" .. RAID)
         b:RegisterForClicks("LeftButtonUp")
 
-        -- 현대적인 버튼 스타일 적용
-        b:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
+        ADDONSELF.theme:ApplyButton(b)
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
-        -- 개별 FontString으로 색상 설정 (다른 애드온과의 충돌 방지)
         local normalFontString = b:GetFontString()
         if normalFontString then
             normalFontString:SetTextColor(1, 1, 1)
         end
-
-        -- 호버 효과
-        b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 눌렸을 때 효과
-        b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-            self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1.0)
-        end)
-
-        b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        -- 아이콘 제거
-        -- local icon = b:CreateTexture(nil, 'ARTWORK')
-        -- icon:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ArmoryChat")
-        -- icon:SetPoint('TOPLEFT', 10, -7)
-        -- icon:SetSize(16, 16)
 
         b:SetScript("OnClick", function(self)
             -- 전체출력 버튼은 항상 모든 정보를 표시 (checkf = false)
@@ -2695,51 +2662,26 @@ function GUI:Init()
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(60)  -- 전체출력 버튼과 동일한 크기
         b:SetHeight(28)
-        b:SetPoint("LEFT", self.reportButton, "RIGHT", 3, 0)  -- 전체출력 버튼 오른쪽에 5px 간격으로 위치
+        b:SetPoint("LEFT", self.reportButton, "RIGHT", 5, 0)
         b:SetText("요약출력")
         b:RegisterForClicks("LeftButtonUp")
 
-        -- 현대적인 버튼 스타일 적용 (전체출력 버튼과 동일)
-        b:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정 (FontObject 직접 수정 금지 - 전역 영향)
+        ADDONSELF.theme:ApplyButton(b)
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
-
-        -- 개별 FontString 생성하여 색상 설정 (전역 FontObject 수정 방지)
         local normalText = b:GetFontString()
         if normalText then
             normalText:SetTextColor(1, 1, 1, 1)
         end
 
-        -- 마우스 오버 효과 (텍스트 색상 변경)
-        b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.3, 0.9)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-            -- 개별 텍스트 색상 변경 (전역 영향 방지)
-            local hoverText = self:GetFontString()
-            if hoverText then
-                hoverText:SetTextColor(1, 1, 0, 1)  -- 노란색
-            end
+        -- 텍스트 색상 호버 효과 (노란색)
+        b:HookScript("OnEnter", function(self)
+            local t = self:GetFontString()
+            if t then t:SetTextColor(1, 1, 0, 1) end
         end)
-
-        b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-            -- 원래 색상으로 복원
-            local normalText = self:GetFontString()
-            if normalText then
-                normalText:SetTextColor(1, 1, 1, 1)  -- 흰색
-            end
+        b:HookScript("OnLeave", function(self)
+            local t = self:GetFontString()
+            if t then t:SetTextColor(1, 1, 1, 1) end
         end)
 
         b:SetScript("OnClick", function(self)
@@ -2777,51 +2719,17 @@ function GUI:Init()
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(120)
         b:SetHeight(28)
-        b:SetPoint("BOTTOMLEFT", 40, 60)
+        -- 아이템 리스트 우측 끝(-13)에 정렬, +수익/+지출 과 동일 줄 (-524, 반칸 간격)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -13, -524)
         b:SetText(L["Export as text"])
 
-        -- 현대적인 버튼 스타일 적용
-        b:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
+        ADDONSELF.theme:ApplyButton(b)
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
-        -- 개별 FontString으로 색상 설정 (다른 애드온과의 충돌 방지)
         local normalFontString = b:GetFontString()
         if normalFontString then
             normalFontString:SetTextColor(1, 1, 1)
         end
-
-        -- 호버 효과
-        b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 눌렸을 때 효과
-        b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-            self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1.0)
-        end)
-
-        b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
 
         b:SetScript("OnClick", function()
             GUI:UpdateSummary()
@@ -3153,7 +3061,8 @@ function GUI:Init()
         }
     end
 
-    -- 블랙리스트/화이트리스트 입력 UI
+    -- 블랙리스트/화이트리스트 입력 UI — 폐기
+    if false then
     do
         -- 블랙리스트 레이블
         local blacklistLabel = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
@@ -3293,6 +3202,7 @@ function GUI:Init()
         -- 로드 후 현재 리스트 표시
         LoadCurrentLists()
     end
+    end -- end of if false (블랙/화이트리스트 폐기)
 
   
 end

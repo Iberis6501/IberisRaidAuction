@@ -74,7 +74,7 @@ local AUTOADDLOOT_TYPE_RAID = 1
 local AUTOADDLOOT_TYPE_DISABLE = 2
 
 -- AutoAddLoot is now accessed through ADDONSELF.cli.AutoAddLoot for GUI synchronization
-local AutoAddLoot = AUTOADDLOOT_TYPE_DISABLE
+local AutoAddLoot = AUTOADDLOOT_TYPE_RAID
 
 -- Expose AutoAddLoot to GUI through ADDONSELF namespace
 if not ADDONSELF.cli then
@@ -84,7 +84,7 @@ ADDONSELF.cli.AutoAddLoot = AutoAddLoot
 
 -- Function to sync AutoAddLoot from database to local
 local function SyncAutoAddLootFromDB()
-    AutoAddLoot = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_DISABLE)
+    AutoAddLoot = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_RAID)
     ADDONSELF.cli.AutoAddLoot = AutoAddLoot
 end
 
@@ -129,7 +129,7 @@ RegEvent("CHAT_MSG_LOOT", function(chatmsg)
 end)
 
 RegEvent("ADDON_LOADED", function()
-    AutoAddLoot = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_DISABLE)
+    AutoAddLoot = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_RAID)
     ADDONSELF.cli.AutoAddLoot = AutoAddLoot
 
     local ldb = LibStub("LibDataBroker-1.1", true)
@@ -152,29 +152,83 @@ RegEvent("ADDON_LOADED", function()
     -- 사용자 설정에 따라 표시/숨김 설정 (true일 때 숨김)
     minimapDB.hide = not Database:GetConfigOrDefault("minimapicon", true)
 
+    -- 누적 수익 — tooltip 과 동일한 calcavg 결과 사용 (단위 환산 일치)
+    local function formatRevenueText()
+        local ledger = Database and Database:GetCurrentLedger()
+        if not ledger or not ledger.items or not ADDONSELF.calcavg then
+            return GetMoneyString and GetMoneyString(0) or "0"
+        end
+        local profit = ADDONSELF.calcavg(ledger.items, 1, nil, nil, true)
+        if GetMoneyString then return GetMoneyString(profit or 0) end
+        return tostring(profit or 0)
+    end
+
     -- LibDataBroker 데이터 객체 생성
     local dataObject = ldb:NewDataObject("IberisRaidAuction", {
-        type = "data source",
-        text = "경매 장부",
-        label = "경매 장부",
-        icon = "Interface\\Icons\\inv_misc_note_03",
+        type  = "data source",
+        text  = formatRevenueText(),
+        label = "IberisRaidAuction",
+        icon  = "Interface\\Icons\\INV_Misc_Coin_01",
         OnClick = function(self, button)
             if button == "LeftButton" then
-                if GUI.mainframe:IsShown() then
+                if GUI.mainframe and GUI.mainframe:IsShown() then
                     GUI.mainframe:Hide()
-                else
+                elseif GUI.mainframe then
                     GUI.mainframe:Show()
+                end
+            elseif button == "RightButton" then
+                if ADDONSELF.options and ADDONSELF.options.Toggle then
+                    ADDONSELF.options:Toggle()
+                else
+                    print("|cff91d7f2[IberisRaidAuction]|r 설정창 모듈 로드 실패")
                 end
             end
         end,
         OnTooltipShow = function(tooltip)
-            tooltip:AddLine("경매 장부")
-            tooltip:AddLine("좌클릭: 창 열기/닫기")
+            tooltip:AddLine("|cff91d7f2IberisRaidAuction|r")
+            tooltip:AddLine(" ")
+            local ok, profit, avg, revenue, expense = pcall(function() return GUI:Summary() end)
+            if ok and revenue then
+                local ledger = Database:GetCurrentLedger()
+                local manualRevenue = 0
+                for _, item in pairs(ledger.items or {}) do
+                    if item.type == "CREDIT" and item.cost and item.cost > 0
+                            and (item.costtype == nil or item.costtype == "GOLD")
+                            and not (item.detail and item.detail.item) then
+                        manualRevenue = manualRevenue + item.cost * 10000
+                    end
+                end
+                local autoRevenue  = (revenue or 0) - manualRevenue
+                local distribution = profit or 0
+                local fmt = ADDONSELF.GetMoneyStringL or GetMoneyString
+                tooltip:AddDoubleLine("아이템",   fmt(autoRevenue,   true), 1,1,1, 1,1,1)
+                tooltip:AddDoubleLine("총수익",   "+" .. fmt(manualRevenue, true), 1,1,1, 0.6,1,0.6)
+                tooltip:AddDoubleLine("총지출",   "-" .. fmt(expense or 0,  true), 1,1,1, 1,0.7,0.7)
+                tooltip:AddDoubleLine("총분배금", fmt(distribution,  true), 1,1,1, 1,0.82,0)
+                tooltip:AddDoubleLine("인당",    fmt(avg or 0,      true), 1,1,1, 0.6,0.85,1)
+            end
+            tooltip:AddLine(" ")
+            tooltip:AddLine("|cffffff00좌클릭|r 경매창", 1, 1, 1)
+            tooltip:AddLine("|cffffff00우클릭|r 설정창", 1, 1, 1)
         end,
     })
 
     -- LibDBIcon에 등록
     icon:Register("IberisRaidAuction", dataObject, minimapDB)
+
+    -- 데이터 변경 시 LDB text 갱신
+    if Database.RegisterChangeCallback then
+        Database:RegisterChangeCallback(function()
+            dataObject.text = formatRevenueText()
+        end)
+    end
+
+    -- 게임 진입/리로드 직후 한 번 더 (다른 애드온 SavedVariables 로드 후 보장)
+    local refreshFrame = CreateFrame("Frame")
+    refreshFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    refreshFrame:SetScript("OnEvent", function()
+        dataObject.text = formatRevenueText()
+    end)
 end)
 
 
@@ -291,6 +345,12 @@ local function HandleCommand(msg)
         Print("[".. L["/ira"] .. " scale] Adjust UI scale (0.7-1.5)")
     elseif cmd == "new" then
         db:NewLedger()
+    elseif cmd == "test" then
+        if ADDONSELF.test and ADDONSELF.test.Generate then
+            ADDONSELF.test:Generate()
+        else
+            Print("test module unavailable")
+        end
     elseif cmd == "clear" then
 
     elseif cmd == "countdown" and not what then
