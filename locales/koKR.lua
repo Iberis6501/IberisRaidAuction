@@ -1,0 +1,21 @@
+local IA = IberisRaidAuction or {}
+IberisRaidAuction = IA
+IA.L = IA.L or {}
+local L = IA.L
+if GetLocale() ~= "koKR" then return end
+
+L["LEDGER_TITLE"]   = "이베리스 경매 장부"
+L["WIDGET_DEFAULT"] = "0골드"
+L["COL_TIME"]       = "시간"
+L["COL_ITEM"]       = "아이템"
+L["COL_PLAYER"]     = "공대원"
+L["COL_GOLD"]       = "골드"
+L["SEARCH"]         = "검색"
+L["QUALITY"]        = "품질"
+L["BIDDER_LIST"]    = "낙찰자 목록"
+L["Q_ALL"]          = "모두"
+L["Q_COMMON"]       = "일반↑"
+L["Q_UNCOMMON"]     = "고급↑"
+L["Q_RARE"]         = "희귀↑"
+L["Q_EPIC"]         = "에픽↑"
+L["Q_LEGENDARY"]    = "전설↑"

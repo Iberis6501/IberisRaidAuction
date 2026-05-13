@@ -1,0 +1,12 @@
+package-as: IberisRaidAuction
+
+ignore:
+  - .github
+  - .gitignore
+  - .pkgmeta
+  - README.md
+  - .release
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
