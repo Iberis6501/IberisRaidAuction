@@ -162,12 +162,33 @@ function Theme:ApplyEditBox(edit)
     edit:SetTextInsets(4, 4, 0, 0)
 end
 
+-- ScrollBar 양 끝 ▲▼ 버튼: ElvUI 풍 평면 + 화살표 글리프
+local function styleArrowBtn(btn, dir)
+    if not btn or btn._iuiArrow then return end
+    btn:Show()
+    btn:SetSize(10, 12)
+    -- 기본 4 텍스처(Normal/Pushed/Disabled/Highlight)를 평면 컬러로 교체
+    local function paint(tex, r, g, b, a)
+        if not tex then return end
+        tex:SetTexture(WHITE8X8)
+        tex:SetAllPoints(btn)
+        tex:SetVertexColor(r, g, b, a)
+    end
+    paint(btn:GetNormalTexture(),     0.10, 0.10, 0.12, 0.90)
+    paint(btn:GetPushedTexture(),     0.05, 0.05, 0.07, 1.00)
+    paint(btn:GetDisabledTexture(),   0.10, 0.10, 0.12, 0.50)
+    paint(btn:GetHighlightTexture(),  0.20, 0.20, 0.25, 0.60)
+    -- 화살표 글리프 ▲ / ▼
+    local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    fs:SetPoint("CENTER")
+    fs:SetText(dir == "up" and "\226\150\178" or "\226\150\188") -- ▲ / ▼
+    fs:SetTextColor(0.7, 0.7, 0.75)
+    btn._iuiArrow = fs
+end
+
 -- ScrollBar (UIPanelScrollFrameTemplate / FauxScrollFrame 의 자식 슬라이더)
 function Theme:ApplyScrollBar(bar)
     if not bar then return end
-    -- 위/아래 버튼 텍스처 제거 후 대체
-    local up   = _G[bar:GetName() and (bar:GetName() .. "ScrollUpButton")]
-    local down = _G[bar:GetName() and (bar:GetName() .. "ScrollDownButton")]
     local thumb = bar.GetThumbTexture and bar:GetThumbTexture() or nil
 
     bar:SetWidth(10)
@@ -188,7 +209,18 @@ function Theme:ApplyScrollBar(bar)
         thumb:SetSize(8, 18)
     end
 
-    -- 위/아래 버튼은 숨김 (미니멀)
-    if up then up:Hide(); up:SetWidth(0.001) end
-    if down then down:Hide(); down:SetWidth(0.001) end
+    -- ▲▼ 버튼 (ElvUI 풍): retail attribute 우선, 글로벌 네이밍 fallback, 마지막으로 children 순회
+    local up   = bar.ScrollUpButton   or _G[(bar:GetName() or "") .. "ScrollUpButton"]
+    local down = bar.ScrollDownButton or _G[(bar:GetName() or "") .. "ScrollDownButton"]
+    if not up or not down then
+        for _, child in ipairs({ bar:GetChildren() }) do
+            if child.GetObjectType and child:GetObjectType() == "Button" then
+                local n = child:GetName() or ""
+                if not up   and n:find("Up")   then up   = child end
+                if not down and n:find("Down") then down = child end
+            end
+        end
+    end
+    styleArrowBtn(up,   "up")
+    styleArrowBtn(down, "down")
 end

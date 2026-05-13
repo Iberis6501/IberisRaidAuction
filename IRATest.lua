@@ -123,32 +123,26 @@ local function buildButton()
     b:SetFrameStrata("HIGH")
     b:SetText("테스트모드")
     b:SetNormalFontObject("GameFontNormal")
-    b:SetBackdrop({
-        bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = true, tileSize = 16, edgeSize = 10,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 },
-    })
-    b:SetBackdropColor(0.2, 0.1, 0.3, 0.9)
-    b:SetBackdropBorderColor(0.6, 0.3, 0.8, 1.0)
     local fs = b:GetFontString()
     if fs then fs:SetTextColor(0.9, 0.7, 1) end
 
+    -- 툴팁: ApplyButton의 색상 후크가 이 위에 추가됨
     b:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(0.3, 0.15, 0.45, 0.95)
-        self:SetBackdropBorderColor(0.8, 0.5, 1.0, 1.0)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText("테스트 아이템 25개 추가")
         GameTooltip:AddLine("카라잔(TBC 2.0/2.1) 도안 4, 보스 에픽 17, 마력추출 인계 2, 결과물 2.", 0.7, 0.7, 0.7, true)
         GameTooltip:Show()
     end)
-    b:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0.2, 0.1, 0.3, 0.9)
-        self:SetBackdropBorderColor(0.6, 0.3, 0.8, 1.0)
-        GameTooltip:Hide()
-    end)
-    b:SetScript("OnMouseDown", function(self) self:SetBackdropColor(0.12, 0.06, 0.2, 1.0) end)
-    b:SetScript("OnMouseUp",   function(self) self:SetBackdropColor(0.3, 0.15, 0.45, 0.95) end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    ADDONSELF.theme:ApplyButton(b, {
+        bgColor     = { 0.20, 0.10, 0.30, 0.90 },
+        borderColor = { 0.60, 0.30, 0.80, 1.00 },
+        bgHover     = { 0.30, 0.15, 0.45, 0.95 },
+        borderHover = { 0.80, 0.50, 1.00, 1.00 },
+        bgPressed   = { 0.12, 0.06, 0.20, 1.00 },
+    })
+
     b:SetScript("OnClick", function()
         local ok, err = xpcall(function() Test:Generate() end, function(e) return tostring(e or "?") end)
         if not ok then

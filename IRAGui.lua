@@ -106,16 +106,16 @@ function GUI:UpdateSummary()
     local splitCount = self:GetSplitNumber() or 0
 
     self.summaryLabel:SetText(
-        "아이템 " .. fmt(autoRevenue, true)
-        .. " + 수익 " .. fmt(manualRevenue, true)
-        .. " - 지출 " .. fmt(expense or 0, true)
-        .. " = 분배금 " .. fmt(distribution, true)
+        "|cffffffff아이템 " .. fmt(autoRevenue, true) .. "|r"
+        .. " |cff60c0ff+ 수익 " .. fmt(manualRevenue, true) .. "|r"
+        .. " |cffff9933- 지출 " .. fmt(expense or 0, true) .. "|r"
+        .. " |cffffd700= 분배금 " .. fmt(distribution, true) .. "|r"
         .. CRLF
-        .. "개인당 " .. fmt(floorNum, true)
-        .. " 파티당 " .. fmt(partyMoney, true)
-        .. " 4명당 " .. fmt(party4, true)
-        .. " 3명당 " .. fmt(party3, true)
-        .. " 2명당 " .. fmt(party2, true)
+        .. "|cff60e060개인당 " .. fmt(floorNum, true) .. "|r"
+        .. " |cffa080ff파티당 " .. fmt(partyMoney, true) .. "|r"
+        .. " |cff80b0d04명당 " .. fmt(party4, true) .. "|r"
+        .. " |cff80c0a03명당 " .. fmt(party3, true) .. "|r"
+        .. " |cffc0a0802명당 " .. fmt(party2, true) .. "|r"
     )
 
     -- 분배 인원 라벨도 같이 갱신 (득자 카운트 변동)
@@ -123,7 +123,39 @@ function GUI:UpdateSummary()
         self.splitLabel:SetText(L["Split into (Current %d)"]:format(GetRosterNumber(), beneficiaryCount))
     end
 
-    checkTrade = self.checkTbutton:GetChecked()
+    -- 최다지출자 / 내 경매지출 / 레이드 시작시 내 골드 (정산 라인 밑) — RaidBook 패턴
+    if self.bottomStatsLabel then
+        local playerName = UnitName("player") or ""
+        local spendByPlayer = {}
+        for _, item in pairs(ledger["items"] or {}) do
+            if item.type == "CREDIT" and item.beneficiary and item.beneficiary ~= ""
+                    and item.cost and item.cost > 0 and item.noBeneficiary ~= true then
+                spendByPlayer[item.beneficiary] = (spendByPlayer[item.beneficiary] or 0) + item.cost
+        end
+        end
+        local topSpender, topAmount = nil, 0
+        for name, amount in pairs(spendByPlayer) do
+            if amount > topAmount then
+                topSpender, topAmount = name, amount
+            end
+        end
+        local myAmount = spendByPlayer[playerName] or 0
+        local bn = BreakUpLargeNumbers or function(n) return tostring(n) end
+
+        local parts = {}
+        if topSpender then
+            table.insert(parts, string.format("|cffd8d8d8최다지출자: %s (%s골드)|r", topSpender, bn(topAmount)))
+        end
+        if myAmount > 0 then
+            table.insert(parts, string.format("|cffb8d4ff내 경매지출: %s골드|r", bn(myAmount)))
+        end
+        local startCopper = ledger._startMoneyCopper
+        if startCopper then
+            local startGold = math.floor(startCopper / 10000)
+            table.insert(parts, string.format("|cffc8c8a0레이드 시작시 내 골드: %s골드|r", bn(startGold)))
+        end
+        self.bottomStatsLabel:SetText(table.concat(parts, "    "))
+    end
 end
 
 function GUI:GetSplitNumber()
@@ -167,8 +199,8 @@ function GUI:UpdateLootTableFromDatabase()
             if entry.realItemIdx then
                 local ledgerItem = ledger["items"][entry.realItemIdx]
                 if ledgerItem and ledgerItem.type == "DEBIT" then
-                    -- entry.beneficiary와 cols[2].value 모두 확인하여 최신 값 수집
-                    local uiBeneficiary = entry.beneficiary or (entry.cols and entry.cols[2] and entry.cols[2].value) or ""
+                    -- entry.beneficiary와 cols[4].value 모두 확인하여 최신 값 수집
+                    local uiBeneficiary = entry.beneficiary or (entry.cols and entry.cols[4] and entry.cols[4].value) or ""
                     -- [알수없음]을 빈 문자열로 변환하여 DEBIT 초기값 문제 해결
                     if uiBeneficiary == L["[Unknown]"] then
                         uiBeneficiary = ""
@@ -237,13 +269,14 @@ function GUI:UpdateLootTableFromDatabase()
         local item = ledger["items"][i]
         if item then
             local shouldShow = false
+            local uiBeneficiary = ""
 
             -- DEBIT 항목은 항상 표시
             if item.type == "DEBIT" then
                 shouldShow = true
                 -- UI에서 수집된 최신 beneficiary 값을 우선 적용
                 -- 빈 문자열인 경우 그대로 사용 (L["[Unknown]"]으로 변환하지 않음)
-                local uiBeneficiary = currentDebitBeneficiaries[i] or item.beneficiary or ""
+                uiBeneficiary = currentDebitBeneficiaries[i] or item.beneficiary or ""
                 -- [알수없음]을 빈 문자열로 변환하여 DEBIT 초기값 문제 해결
                 if uiBeneficiary == L["[Unknown]"] then
                     uiBeneficiary = ""
@@ -251,17 +284,20 @@ function GUI:UpdateLootTableFromDatabase()
             -- CREDIT 항목 중 ITEM 타입이 아닌 것들만 표시 (ITEM 타입은 위에서 그룹화 처리됨)
             elseif item.type == "CREDIT" and (not item.detail or item.detail.type ~= "ITEM") then
                 shouldShow = true
+                uiBeneficiary = item.beneficiary or ""
             end
 
             if shouldShow then
                 table.insert(data, {
                     ["cols"] = {
-                        { ["value"] = i },
-                        { ["value"] = uiBeneficiary },  -- UI에서 수집된 최신 DEBIT 득자 정보 표시
-                        { ["value"] = "" },
-                        { ["value"] = "" },
-                        { ["value"] = "" },
-                        { ["value"] = item.noBeneficiary or false }
+                        { ["value"] = i },                    -- 1: 안 보임 idx
+                        { ["value"] = "" },                   -- 2: 스피커
+                        { ["value"] = i },                    -- 3: 순번 (보이는 idx)
+                        { ["value"] = uiBeneficiary },        -- 4: DEBIT 득자 임시 저장소 (기존 cols[4])
+                        { ["value"] = "" },                   -- 5: Entry
+                        { ["value"] = "" },                   -- 6: Beneficiary
+                        { ["value"] = "" },                   -- 7: Value
+                        { ["value"] = item.noBeneficiary or false }  -- 8: NoBeneficiary
                     },
                     ["realItemIdx"] = i,
                     ["realItemData"] = item,
@@ -297,12 +333,14 @@ function GUI:UpdateLootTableFromDatabase()
 
                 table.insert(data, {
             ["cols"] = {
-                { ["value"] = firstItemIdx },  -- 첫 번째 아이템 인덱스
-                { ["value"] = uiBeneficiary },
-                { ["value"] = "" },
-                { ["value"] = "" },
-                { ["value"] = "" },
-                { ["value"] = firstItem.noBeneficiary or false }
+                { ["value"] = firstItemIdx },         -- 1: 안 보임 idx
+                { ["value"] = "" },                   -- 2: 스피커
+                { ["value"] = firstItemIdx },         -- 3: 순번
+                { ["value"] = uiBeneficiary },        -- 4: DEBIT 득자 임시 저장소 (기존 cols[4])
+                { ["value"] = "" },                   -- 5: Entry
+                { ["value"] = "" },                   -- 6: Beneficiary
+                { ["value"] = "" },                   -- 7: Value
+                { ["value"] = firstItem.noBeneficiary or false }  -- 8: NoBeneficiary
             },
             ["realItemIdx"] = firstItemIdx,
             ["realItemData"] = firstItem,  -- 원본 데이터 참조 (수정 안 함)
@@ -327,7 +365,7 @@ function GUI:UpdateLootTableFromDatabase()
                 if self.lootLogFrame and self.lootLogFrame.data then
                     for _, entry in ipairs(self.lootLogFrame.data) do
                         if entry.realItemIdx == idx then
-                            entry.cols[2].value = beneficiary
+                            entry.cols[4].value = beneficiary
                             entry.realItemData.beneficiary = beneficiary
                             break
                         end
@@ -403,6 +441,55 @@ local function GetEntryFromUI(rowFrame, cellFrame, data, cols, row, realrow, col
     return entry, idx
 end
 
+-- ===== 경매 시작 알림 (RaidBook RBGui.lua 차용) =====
+local EQUIP_LOC_KR = {
+    INVTYPE_HEAD = "머리", INVTYPE_NECK = "목", INVTYPE_SHOULDER = "어깨",
+    INVTYPE_CHEST = "가슴", INVTYPE_ROBE = "가슴", INVTYPE_WAIST = "허리",
+    INVTYPE_LEGS = "다리", INVTYPE_FEET = "발", INVTYPE_WRIST = "손목",
+    INVTYPE_HAND = "손", INVTYPE_FINGER = "손가락", INVTYPE_TRINKET = "장신구",
+    INVTYPE_CLOAK = "등", INVTYPE_WEAPON = "한손 무기", INVTYPE_2HWEAPON = "양손 무기",
+    INVTYPE_WEAPONMAINHAND = "주장비", INVTYPE_WEAPONOFFHAND = "보조장비",
+    INVTYPE_SHIELD = "방패", INVTYPE_RANGED = "원거리", INVTYPE_HOLDABLE = "보조장비",
+    INVTYPE_THROWN = "투척", INVTYPE_RANGEDRIGHT = "원거리", INVTYPE_RELIC = "유물",
+}
+
+local function GetEquipInfoText(link)
+    if not link then return "" end
+    local _, _, _, _, _, _, itemSubType, _, itemEquipLoc = GetItemInfo(link)
+    if not itemEquipLoc or itemEquipLoc == "" then return "" end
+    local slotKR = EQUIP_LOC_KR[itemEquipLoc]
+    if not slotKR then return "" end
+    if itemSubType and itemSubType ~= "" then
+        return " (" .. itemSubType .. ", " .. slotKR .. ")"
+    end
+    return " (" .. slotKR .. ")"
+end
+
+local function AnnounceAuction(itemLink)
+    if not itemLink or itemLink == "" then return end
+    local equipInfo = GetEquipInfoText(itemLink)
+    local warningMsg = itemLink .. equipInfo
+    local auctionMsg = "=== " .. itemLink .. equipInfo .. " 경매 시작합니다. ==="
+    if IsInRaid() then
+        local myRank = 0
+        local pName = UnitName("player")
+        for i = 1, MAX_RAID_MEMBERS do
+            local name, rank = GetRaidRosterInfo(i)
+            if name == pName then myRank = rank or 0; break end
+        end
+        if myRank > 0 then
+            SendChatMessage(warningMsg, "RAID_WARNING")
+            SendChatMessage(auctionMsg, "RAID")
+        else
+            SendChatMessage(warningMsg, "RAID")
+            SendChatMessage(auctionMsg, "RAID")
+        end
+    else
+        ADDONSELF.print(warningMsg)
+        ADDONSELF.print(auctionMsg)
+    end
+end
+
 local function CreateCellUpdate(cb)
     return function(rowFrame, cellFrame, data, cols, row, realrow, column, fShow, table, ...)
         if not fShow then
@@ -449,18 +536,13 @@ function GUI:Init()
 
     local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     f:SetWidth(650)
-    f:SetHeight(705)
+    -- 메인프레임 height = bottomStatsLabel 라인 끝(-742) + 28px 갭 = 770
+    f:SetHeight(770)
     ADDONSELF.theme:ApplyFrame(f)
     f:SetPoint("CENTER", 0, 0)
     f:SetToplevel(true)
     f:EnableMouse(true)
 
-    -- 추가 배경: 아래쪽으로 50px 더 확장 (resize handle 영역)
-    local extraBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    extraBg:SetWidth(650)
-    extraBg:SetHeight(50)
-    extraBg:SetPoint("TOP", f, "BOTTOM", 0, 0)
-    ADDONSELF.theme:ApplyFrame(extraBg)
     f:SetMovable(true)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
@@ -493,9 +575,9 @@ function GUI:Init()
         local MIN_SCALE, MAX_SCALE = 0.6, 2.0
         local SENSITIVITY = 200 -- 마우스 200px 이동당 scale 1.0 변화
 
-        local rh = CreateFrame("Button", nil, extraBg)
+        local rh = CreateFrame("Button", nil, f)
         rh:SetSize(16, 16)
-        rh:SetPoint("BOTTOMRIGHT", extraBg, "BOTTOMRIGHT", -2, 2)
+        rh:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
         rh:SetFrameStrata("HIGH")
         rh:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
         rh:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
@@ -526,54 +608,24 @@ function GUI:Init()
         rh:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
-    -- 우측 상단 최소화 버튼
+    -- 우측 상단 최소화 버튼 (테마: 호버 녹색 강조)
     do
         local minimizeBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
         minimizeBtn:SetWidth(24)
         minimizeBtn:SetHeight(24)
-        minimizeBtn:SetPoint("TOPRIGHT", f, -29, -5) -- X 버튼 왼쪽에 위치
+        minimizeBtn:SetPoint("TOPRIGHT", f, -29, -5) -- X 버튼 왼쪽
 
-        -- 원형 버튼 스타일
-        minimizeBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 }
+        ADDONSELF.theme:ApplyButton(minimizeBtn, {
+            bgHover     = { 0.20, 0.80, 0.20, 0.95 },
+            borderHover = { 0.40, 1.00, 0.40, 1.00 },
+            bgPressed   = { 0.10, 0.60, 0.10, 1.00 },
         })
-        minimizeBtn:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        minimizeBtn:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
 
-        -- 텍스트 스타일
         local text = minimizeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         text:SetTextColor(1, 1, 1)
         text:SetText("-")
         text:SetPoint("CENTER", 0, 0)
 
-        -- 호버 효과
-        minimizeBtn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.2, 0.8, 0.2, 0.95)
-            self:SetBackdropBorderColor(0.4, 1.0, 0.4, 1.0)
-        end)
-
-        minimizeBtn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 클릭 효과
-        minimizeBtn:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.6, 0.1, 1.0)
-            self:SetBackdropBorderColor(0.2, 0.8, 0.2, 1.0)
-        end)
-
-        minimizeBtn:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.2, 0.8, 0.2, 0.95)
-            self:SetBackdropBorderColor(0.4, 1.0, 0.4, 1.0)
-        end)
-
-        -- 최소화 기능
         minimizeBtn:SetScript("OnClick", function()
             f:Hide()
             if GUI.minimizeIcon then
@@ -582,214 +634,27 @@ function GUI:Init()
         end)
     end
 
-    -- 우측 상단 X 닫기 버튼
+    -- 우측 상단 X 닫기 버튼 (테마: 호버 빨강 강조)
     do
         local closeBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
         closeBtn:SetWidth(24)
         closeBtn:SetHeight(24)
         closeBtn:SetPoint("TOPRIGHT", f, -5, -5)
 
-        -- 원형 버튼 스타일
-        closeBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 }
+        ADDONSELF.theme:ApplyButton(closeBtn, {
+            bgHover     = { 0.80, 0.20, 0.20, 0.95 },
+            borderHover = { 1.00, 0.40, 0.40, 1.00 },
+            bgPressed   = { 0.60, 0.10, 0.10, 1.00 },
         })
-        closeBtn:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        closeBtn:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
 
-        -- 텍스트 스타일
         local text = closeBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         text:SetTextColor(1, 1, 1)
         text:SetText("X")
         text:SetPoint("CENTER", 0, 0)
 
-        -- 호버 효과
-        closeBtn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.8, 0.2, 0.2, 0.95)
-            self:SetBackdropBorderColor(1.0, 0.4, 0.4, 1.0)
-        end)
-
-        closeBtn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 클릭 효과
-        closeBtn:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.6, 0.1, 0.1, 1.0)
-            self:SetBackdropBorderColor(0.8, 0.2, 0.2, 1.0)
-        end)
-
-        closeBtn:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.8, 0.2, 0.2, 0.95)
-            self:SetBackdropBorderColor(1.0, 0.4, 0.4, 1.0)
-        end)
-
-        -- 닫기 기능
         closeBtn:SetScript("OnClick", function() f:Hide() end)
     end
 
-    -- 메인 창 카운트다운 버튼들
-    do
-        -- 카운트다운 버튼
-        local countdownBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
-        countdownBtn:SetWidth(80)
-        countdownBtn:SetHeight(25)
-        countdownBtn:SetPoint("TOPRIGHT", f, -300, -480)
-
-        -- 버튼 스타일
-        countdownBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        countdownBtn:SetBackdropColor(0.2, 0.2, 0.3, 0.95)
-        countdownBtn:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 버튼 텍스트
-        local btnText = countdownBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btnText:SetTextColor(1, 1, 1)
-        btnText:SetText("Count")
-        btnText:SetPoint("CENTER", 0, 0)
-
-        -- 호버 효과
-        countdownBtn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.3, 0.3, 0.4, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Start Countdown (5>1)")
-            GameTooltip:Show()
-        end)
-
-        countdownBtn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.2, 0.2, 0.3, 0.95)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-            GameTooltip:Hide()
-        end)
-
-        -- 클릭 효과
-        countdownBtn:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-        end)
-
-        countdownBtn:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.3, 0.3, 0.4, 0.95)
-        end)
-
-        -- 카운트다운 기능
-        countdownBtn:SetScript("OnClick", function()
-            if not GUI.countdownActive then
-                GUI.countdownActive = true
-                GUI.currentCount = 5
-
-                -- 데이터베이스에서 메시지 가져오기
-                local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
-                    count = "--- %d",
-                    closed = "--- BIDDING CLOSED",
-                    resume = "--- NEW BID. RESUMING"
-                })
-
-                -- 시작 메시지 전송
-                SendChatMessage(string.format(messages.count, GUI.currentCount), "RAID_WARNING")
-
-                local function countStep()
-                    if GUI.countdownActive and GUI.currentCount > 1 then
-                        GUI.currentCount = GUI.currentCount - 1
-                        SendChatMessage(string.format(messages.count, GUI.currentCount), "RAID_WARNING")
-                        GUI.countdownTimer = C_Timer.After(1.0, countStep)
-                    else
-                        if GUI.countdownActive then
-                            SendChatMessage(messages.closed, "RAID_WARNING")
-                        end
-                        GUI.countdownActive = false
-                        GUI.countdownTimer = nil
-                    end
-                end
-
-                GUI.countdownTimer = C_Timer.After(1.0, countStep)
-            end
-        end)
-
-        countdownBtn:Hide()  -- IRACountdown.lua 의 새 버튼 그룹 사용 — 기존 버튼 폐기
-    end
-
-    do
-        -- 중지 버튼
-        local stopBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
-        stopBtn:SetWidth(80)
-        stopBtn:SetHeight(25)
-        stopBtn:SetPoint("TOPRIGHT", f, -218, -480)
-
-        -- 버튼 스타일
-        stopBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 8,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        stopBtn:SetBackdropColor(0.6, 0.2, 0.2, 0.95)
-        stopBtn:SetBackdropBorderColor(0.8, 0.3, 0.3, 1.0)
-
-        -- 버튼 텍스트
-        local btnText = stopBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        btnText:SetTextColor(1, 1, 1)
-        btnText:SetText("Stop")
-        btnText:SetPoint("CENTER", 0, 0)
-
-        -- 호버 효과
-        stopBtn:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.8, 0.3, 0.3, 0.95)
-            self:SetBackdropBorderColor(1.0, 0.4, 0.4, 1.0)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Stop Countdown & Resume")
-            GameTooltip:Show()
-        end)
-
-        stopBtn:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.6, 0.2, 0.2, 0.95)
-            self:SetBackdropBorderColor(0.8, 0.3, 0.3, 1.0)
-            GameTooltip:Hide()
-        end)
-
-        -- 클릭 효과
-        stopBtn:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.4, 0.1, 0.1, 1.0)
-        end)
-
-        stopBtn:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.8, 0.3, 0.3, 0.95)
-        end)
-
-        -- 중지 기능
-        stopBtn:SetScript("OnClick", function()
-            if GUI.countdownActive then
-                GUI.countdownActive = false
-                if GUI.countdownTimer then
-                    GUI.countdownTimer = nil
-                end
-
-                -- 데이터베이스에서 재개 메시지 가져오기
-                local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
-                    count = "--- %d",
-                    closed = "--- BIDDING CLOSED",
-                    resume = "--- NEW BID. RESUMING"
-                })
-
-                SendChatMessage(messages.resume, "RAID_WARNING")
-            end
-        end)
-
-        stopBtn:Hide()  -- IRACountdown.lua 의 새 버튼 그룹 사용 — 기존 버튼 폐기
-    end
 
     local menuFrame = CreateFrame("Frame", nil, UIParent, "UIDropDownMenuTemplate")
 
@@ -827,15 +692,31 @@ function GUI:Init()
         self:SetText(string.sub(t, 0, #t - 1))
     end    
 
-    -- split member and editbox
+    -- 분배 인원 라벨 먼저 (countEdit 위치 기준점)
+    do
+        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -626)
+        self.splitLabel = t
+        -- 초기 텍스트 (득자 0)
+        t:SetText(L["Split into (Current %d)"]:format(GetRosterNumber(), 0))
+        -- roster 변경 시 UpdateSummary가 splitLabel도 갱신
+        RegEvent("GROUP_ROSTER_UPDATE", function() GUI:UpdateSummary() end)
+        RegEvent("CHAT_MSG_SYSTEM",     function() GUI:UpdateSummary() end)
+    end
+
+    -- split editbox (라벨 우측에 바짝 붙임)
     do
         local t = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-        t:SetWidth(80)
-        t:SetHeight(25)
-        t:SetPoint("TOPLEFT", f, "TOPLEFT", 230, -566)
+        t:SetWidth(50)
+        t:SetHeight(20)
+        t:SetPoint("LEFT", self.splitLabel, "RIGHT", 8, -1)
         t:SetAutoFocus(false)
         t:SetMaxLetters(4)
         ADDONSELF.theme:ApplyEditBox(t)
+        -- 메인 BG와 명확히 구분되게 더 진한 배경
+        if t.SetBackdropColor then
+            t:SetBackdropColor(0.02, 0.02, 0.03, 0.98)
+        end
         -- t:SetNumeric(true)
         t:SetScript("OnTextChanged", function()
             -- 사용자가 입력한 분배 인원 값을 데이터베이스에 저장
@@ -864,634 +745,133 @@ function GUI:Init()
         t:SetText(savedSplitCount)
         self.countEdit = t
     end
-
-    do
-        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -572)
-        self.splitLabel = t
-        -- 초기 텍스트 (득자 0)
-        t:SetText(L["Split into (Current %d)"]:format(GetRosterNumber(), 0))
-        -- roster 변경 시 UpdateSummary가 splitLabel도 갱신
-        RegEvent("GROUP_ROSTER_UPDATE", function() GUI:UpdateSummary() end)
-        RegEvent("CHAT_MSG_SYSTEM",     function() GUI:UpdateSummary() end)
-    end
     --
 
-    --[[
-    -- dropbox filter (분배 단위) - 커스텀 드롭다운 (분배 인원 수 설정 드롭다운) - 주석 처리
-    -- 분배 인원 설정은 직접 입력 필드 사용
-    do
-        local container = CreateFrame("Frame", nil, f)
-        container:SetWidth(80)
-        container:SetHeight(28)
-        container:SetPoint("BOTTOMLEFT", f, 410, 10)
 
-        -- 메인 버튼
-        local button = CreateFrame("Button", nil, container, "BackdropTemplate")
-        button:SetAllPoints(container)
-        button:SetText("40인 ▼")
 
-        -- 현대적인 버튼 스타일 적용
-        button:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        button:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        button:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
-        button:SetNormalFontObject("GameFontNormal")
-        local fontString = button:GetFontString()
-        if fontString then
-            fontString:SetTextColor(1, 1, 1)
-        end
-
-        -- 호버 효과
-        button:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        button:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 드롭다운 메뉴 프레임
-        local dropdown = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        dropdown:SetWidth(80)
-        dropdown:SetPoint("TOP", container, "BOTTOM", 0, -2)
-        dropdown:Hide()
-
-        -- 메뉴 스타일
-        dropdown:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        dropdown:SetBackdropColor(0.15, 0.15, 0.2, 0.95)
-        dropdown:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 메뉴 아이템들
-        local menuItems = {
-            {text = "40인", value = 40},
-            {text = "20인", value = 20},
-            {text = "10인", value = 10},
-            {text = "5인", value = 5},
-            {text = "분배안함", value = 0}
-        }
-
-        local selectedValue = 40
-
-        -- 메뉴 아이템 생성
-        for i, item in ipairs(menuItems) do
-            local itemButton = CreateFrame("Button", nil, dropdown, "BackdropTemplate")
-            itemButton:SetWidth(76)
-            itemButton:SetHeight(22)
-            itemButton:SetPoint("TOP", dropdown, "TOP", 0, -(i-1)*24)
-            itemButton:SetText(item.text)
-
-            -- 메뉴 아이템 스타일
-            itemButton:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                edgeFile = "",
-                tile = false,
-                tileSize = 0,
-                edgeSize = 0,
-                insets = { left = 0, right = 0, top = 0, bottom = 0 }
-            })
-            itemButton:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-
-            -- 텍스트 설정
-            itemButton:SetNormalFontObject("GameFontNormalSmall")
-            local itemFontString = itemButton:GetFontString()
-                if itemFontString then
-                    itemFontString:SetTextColor(1, 1, 1)
-                end
-
-            -- 호버 효과
-            itemButton:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.3, 0.3, 0.4, 0.9)
-            end)
-
-            itemButton:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-            end)
-
-            -- 클릭 이벤트
-            itemButton:SetScript("OnClick", function()
-                selectedValue = item.value
-                button:SetText(item.text .. " ▼")
-                dropdown:Hide()
-                Database:SetConfig("dividelevel", item.value)
-                checkf = item.value
-
-                -- UI 요약 정보 실시간 업데이트 (총수익, 개인당 골드, 파티당 골드)
-                GUI:UpdateSummary()
-            end)
-        end
-
-        dropdown:SetHeight(#menuItems * 24 + 4)
-
-        -- 메인 버튼 클릭 시 메뉴 토글
-        button:SetScript("OnClick", function()
-            if dropdown:IsShown() then
-                dropdown:Hide()
-            else
-                dropdown:Show()
-                -- 다른 드롭다운들 닫기
-                if GUI.customDropdowns then
-                    for _, dd in pairs(GUI.customDropdowns) do
-                        if dd ~= dropdown then
-                            dd:Hide()
-                        end
-                    end
-                end
-            end
-        end)
-
-        -- 전역 드롭다운 리스트에 추가
-        if not GUI.customDropdowns then
-            GUI.customDropdowns = {}
-        end
-        table.insert(GUI.customDropdowns, dropdown)
-
-        -- 다른 곳 클릭 시 닫기
-        container:SetScript("OnHide", function()
-            dropdown:Hide()
-        end)
-
-        -- 커스텀 드롭다운으로 교체됨
-        -- checkf 변수는 더 이상 사용하지 않음 (GUI.roundingLevel 사용)
-
-    end
-    --]]
-
-    -- Auto loot recording dropdown — 메인창에서 폐기 (옵션창에서만 설정)
-    if false then
-    do
-        local container = CreateFrame("Frame", nil, f)
-        container:SetWidth(120)
-        container:SetHeight(28)
-        container:SetPoint("BOTTOMLEFT", f, 280, 10) -- #2
-
-        -- 메인 버튼
-        local button = CreateFrame("Button", nil, container, "BackdropTemplate")
-        button:SetAllPoints(container)
-        button:SetText("공격대일때만 ▼")
-
-        -- GUI에서 버튼 참조 저장 (CLI 업데이트용)
-        GUI.autoLootButton = button
-
-        -- 현대적인 버튼 스타일 적용
-        button:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        button:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        button:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
-        button:SetNormalFontObject("GameFontNormal")
-        local fontString = button:GetFontString()
-        if fontString then
-            fontString:SetTextColor(1, 1, 1)
-        end
-
-        -- 호버 효과
-        button:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        button:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 드롭다운 메뉴 프레임
-        local dropdown = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        dropdown:SetWidth(140)
-        dropdown:SetPoint("TOP", container, "BOTTOM", 0, -2)
-        dropdown:Hide()
-
-        -- 메뉴 스타일
-        dropdown:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        dropdown:SetBackdropColor(0.15, 0.15, 0.2, 0.95)
-        dropdown:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 메뉴 아이템들
-        local menuItems = {
-            {text = "항상 자동 기록", value = 0},
-            {text = "공격대일때만", value = 1},
-            {text = "자동 기록 끔", value = 2}
-        }
-
-        -- 메뉴 아이템 생성
-        for i, item in ipairs(menuItems) do
-            local itemButton = CreateFrame("Button", nil, dropdown, "BackdropTemplate")
-            itemButton:SetWidth(136)
-            itemButton:SetHeight(22)
-            itemButton:SetPoint("TOP", dropdown, "TOP", 0, -(i-1)*24)
-            itemButton:SetText(item.text)
-
-            -- 메뉴 아이템 스타일
-            itemButton:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                edgeFile = "",
-                tile = false,
-                tileSize = 0,
-                edgeSize = 0,
-                insets = { left = 0, right = 0, top = 0, bottom = 0 }
-            })
-            itemButton:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-
-            -- 텍스트 설정
-            itemButton:SetNormalFontObject("GameFontNormalSmall")
-            local itemFontString = itemButton:GetFontString()
-                if itemFontString then
-                    itemFontString:SetTextColor(1, 1, 1)
-                end
-
-            -- 호버 효과
-            itemButton:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.3, 0.3, 0.4, 0.9)
-            end)
-
-            itemButton:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-            end)
-
-            -- 클릭 이벤트
-            itemButton:SetScript("OnClick", function()
-                button:SetText(item.text .. " ▼")
-                dropdown:Hide()
-                -- Save to database
-                Database:SetConfig("autoaddloot", item.value)
-
-                -- Database is the single source of truth
-                -- No need to update CLI variable as it will read from DB when needed
-            end)
-        end
-
-        dropdown:SetHeight(#menuItems * 24 + 4)
-
-        -- 메인 버튼 클릭 시 메뉴 토글
-        button:SetScript("OnClick", function()
-            if dropdown:IsShown() then
-                dropdown:Hide()
-            else
-                dropdown:Show()
-                -- 다른 드롭다운들 닫기
-                if GUI.customDropdowns then
-                    for _, dd in pairs(GUI.customDropdowns) do
-                        if dd ~= dropdown then
-                            dd:Hide()
-                        end
-                    end
-                end
-            end
-        end)
-
-        -- 전역 드롭다운 리스트에 추가
-        if not GUI.customDropdowns then
-            GUI.customDropdowns = {}
-        end
-        table.insert(GUI.customDropdowns, dropdown)
-
-        -- 다른 곳 클릭 시 닫기
-        container:SetScript("OnHide", function()
-            dropdown:Hide()
-        end)
-
-        -- 초기값 설정 - 데이터베이스에서 직접 읽기
-        local currentValue = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_DISABLE)
-        if currentValue == 0 then
-            button:SetText("항상 자동 기록 ▼")
-        elseif currentValue == 1 then
-            button:SetText("공격대일때만 ▼")
-        elseif currentValue == 2 then
-            button:SetText("자동 기록 끔 ▼")
-        end
-    end
-    end -- end of if false (자동 기록 dropdown 폐기)
-
-    -- Gold/Silver rounding dropdown — 폐기 (항상 골드 단위 floor)
-    if false then
-    do
-        local container = CreateFrame("Frame", nil, f)
-        container:SetWidth(100)
-        container:SetHeight(28)
-        container:SetPoint("BOTTOMLEFT", f, 410, 10) -- #3
-
-        -- 메인 버튼
-        local button = CreateFrame("Button", nil, container, "BackdropTemplate")
-        button:SetAllPoints(container)
-        button:SetText("절삭 없음 ▼")
-
-        -- GUI에서 버튼 참조 저장 (CLI 업데이트용)
-        GUI.roundingButton = button
-
-        -- 현대적인 버튼 스타일 적용
-        button:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        button:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        button:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
-        button:SetNormalFontObject("GameFontNormal")
-        local fontString = button:GetFontString()
-        if fontString then
-            fontString:SetTextColor(1, 1, 1)
-        end
-
-        -- 호버 효과
-        button:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        button:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
-
-        -- 드롭다운 메뉴 프레임
-        local dropdown = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        dropdown:SetWidth(100)
-        dropdown:SetPoint("TOP", container, "BOTTOM", 0, -2)
-        dropdown:Hide()
-
-        -- 메뉴 스타일
-        dropdown:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        dropdown:SetBackdropColor(0.15, 0.15, 0.2, 0.95)
-        dropdown:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 메뉴 아이템들
-        local menuItems = {
-            {text = "절삭 없음", value = 2},
-            {text = "실버 단위", value = 1},
-            {text = "골드 단위", value = 0}
-        }
-
-        local selectedValue = 2
-
-        -- 메뉴 아이템 생성
-        for i, item in ipairs(menuItems) do
-            local itemButton = CreateFrame("Button", nil, dropdown, "BackdropTemplate")
-            itemButton:SetWidth(96)
-            itemButton:SetHeight(22)
-            itemButton:SetPoint("TOP", dropdown, "TOP", 0, -(i-1)*24)
-            itemButton:SetText(item.text)
-
-            -- 메뉴 아이템 스타일
-            itemButton:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                edgeFile = "",
-                tile = false,
-                tileSize = 0,
-                edgeSize = 0,
-                insets = { left = 0, right = 0, top = 0, bottom = 0 }
-            })
-            itemButton:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-
-            -- 텍스트 설정
-            itemButton:SetNormalFontObject("GameFontNormalSmall")
-            local itemFontString = itemButton:GetFontString()
-                if itemFontString then
-                    itemFontString:SetTextColor(1, 1, 1)
-                end
-
-            -- 호버 효과
-            itemButton:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.3, 0.3, 0.4, 0.9)
-            end)
-
-            itemButton:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-            end)
-
-            -- 클릭 이벤트
-            itemButton:SetScript("OnClick", function()
-                selectedValue = item.value
-                button:SetText(item.text .. " ▼")
-                dropdown:Hide()
-                Database:SetConfig("roundinglevel", item.value)
-                GUI.roundingLevel = item.value
-
-                -- UI 요약 정보 실시간 업데이트 (총수익, 개인당 골드, 파티당 골드)
-                GUI:UpdateSummary()
-
-                -- 텍스트 모드가 열려있으면 내용 업데이트
-                if GUI.exportEditbox and GUI.exportEditbox:GetParent():IsShown() then
-                    local splitNumber = GUI:GetSplitNumber()
-                    local checkbox = GUI.checkAllDistributeButton or _G.IberisRaidAuctionCheckAllDistributeButton
-                    local checkAllDistribute = true
-                    if checkbox then
-                        local rawValue = checkbox:GetChecked()
-                        checkAllDistribute = (rawValue == true) or (rawValue == 1)
-                    end
-                    GUI.exportEditbox:SetText(GenExport(Database:GetCurrentLedger()["items"], splitNumber, nil, checkAllDistribute))
-                end
-            end)
-        end
-
-        dropdown:SetHeight(#menuItems * 24 + 4)
-
-        -- 메인 버튼 클릭 시 메뉴 토글
-        button:SetScript("OnClick", function()
-            if dropdown:IsShown() then
-                dropdown:Hide()
-            else
-                dropdown:Show()
-                -- 다른 드롭다운들 닫기
-                if GUI.customDropdowns then
-                    for _, dd in pairs(GUI.customDropdowns) do
-                        if dd ~= dropdown then
-                            dd:Hide()
-                        end
-                    end
-                end
-            end
-        end)
-
-        -- 전역 드롭다운 리스트에 추가
-        if not GUI.customDropdowns then
-            GUI.customDropdowns = {}
-        end
-        table.insert(GUI.customDropdowns, dropdown)
-
-        -- 다른 곳 클릭 시 닫기
-        container:SetScript("OnHide", function()
-            dropdown:Hide()
-        end)
-
-        -- 초기값 설정 - 데이터베이스에서 직접 읽기
-        local currentValue = Database:GetConfigOrDefault("roundinglevel", 2)
-        GUI.roundingLevel = currentValue
-
-        if currentValue == 0 then
-            button:SetText("골드 단위 ▼")
-        elseif currentValue == 1 then
-            button:SetText("실버 단위 ▼")
-        elseif currentValue == 2 then
-            button:SetText("절삭 없음 ▼")
-        end
-    end
-    end -- end of if false (rounding dropdown 폐기)
 
 
     --
+
+    -- 올분/무득분 토글 버튼 — 외형: 분홍 테두리 / 기능: RaidBook 패턴
     do
-        local t = CreateFrame("CheckButton", nil, f, "BackdropTemplate")
-        t:SetWidth(20)
-        t:SetHeight(20)
-        t:SetPoint("BOTTOMLEFT", f, 200, 71)
-        t:SetChecked(true)
+        local btn = CreateFrame("Button", nil, f, "BackdropTemplate")
+        btn:SetWidth(110)
+        btn:SetHeight(22)
+        btn:SetPoint("LEFT", self.countEdit, "RIGHT", 8, 0)
+        btn:SetFrameStrata("HIGH")          -- 자동 박스에 안 가려지도록 위로
+        btn:SetFrameLevel(50)
+        btn:SetBackdrop(ADDONSELF.theme:Backdrop({ edgeSize = 1 }))
 
-        -- 체크박스 기본 스타일 (배경 및 테두리 없음)
-        -- WoW 기본 체크박스 텍스처만 사용
-        t:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
-        t:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
-        t:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight")
-        t:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        -- 자동/시작/중지 버튼과 완전 동일한 폰트 패턴 (SetFont 호출 X)
+        local btnText = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        btnText:SetPoint("CENTER")
+        btnText:SetText("올분 (40)")        -- 초기 풀 라벨
 
-        -- 클릭 효과
-        t:SetScript("OnClick", function()
-            checkTrade = t:GetChecked()
-        end)
-        self.checkTbutton = t
-
-        t:Hide()  -- UI 폐기 — 항상 자동 기록 디폴트
-    end
-    do
-        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        t:SetPoint("BOTTOMLEFT", f, 230, 76)
-	t:SetText("거래시 자동으로 기록")
-        t:Hide()  -- 라벨도 폐기
-    end
-
-    -- 모두 분배 체크박스
-    do
-        local t = CreateFrame("CheckButton", nil, f, "BackdropTemplate")
-        t:SetWidth(20)
-        t:SetHeight(20)
-        t:SetPoint("BOTTOMLEFT", f, 340, 71)
-        -- 데이터베이스에서 체크 상태 불러오기
         local savedState = Database:GetConfigOrDefault("checkAllDistribute", true)
-        t:SetChecked(savedState)
+        GUI._checkAllDistributeState = savedState
 
-        -- 체크박스 기본 스타일 (배경 및 테두리 없음)
-        -- WoW 기본 체크박스 텍스처만 사용
-        t:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
-        t:SetPushedTexture("Interface\\Buttons\\UI-CheckBox-Down")
-        t:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight")
-        t:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+        local function updateDistBtnStyle()
+            -- 분홍 테두리 강조 (활성=밝은 분홍 / 비활성=어두운 분홍). 배경/텍스트는 둘 다 흰색 + 검정 BG 로 가시성 확보.
+            if GUI._checkAllDistributeState then
+                btn:SetBackdropColor(0, 0, 0, 0.65)
+                btn:SetBackdropBorderColor(1.00, 0.40, 0.72, 1.0)
+                btnText:SetTextColor(1.00, 1.00, 1.00)
+            else
+                btn:SetBackdropColor(0, 0, 0, 0.65)
+                btn:SetBackdropBorderColor(0.50, 0.28, 0.40, 1.0)
+                btnText:SetTextColor(0.75, 0.65, 0.70)
+            end
+        end
 
-        -- 클릭 효과
-        t:SetScript("OnClick", function()
-            -- 체크 상태를 데이터베이스에 저장
-            local currentState = t:GetChecked()
-            Database:SetConfig("checkAllDistribute", currentState)
+        updateDistBtnStyle()
 
-              
-            -- "모두 분배" 라벨 업데이트
+        btn.GetChecked = function()
+            return GUI._checkAllDistributeState
+        end
+
+        btn:SetScript("OnClick", function()
+            GUI._checkAllDistributeState = not GUI._checkAllDistributeState
+            Database:SetConfig("checkAllDistribute", GUI._checkAllDistributeState)
+            updateDistBtnStyle()
+
+            -- RaidBook 패턴 호출 (정상 흐름)
             UpdateAllDistributeLabel()
+            -- 위 호출이 silent 실패 시를 대비한 직접 fallback
+            local n = tonumber(GUI.countEdit:GetText()) or 40
+            if GUI._checkAllDistributeState then
+                btnText:SetText("올분 (" .. n .. ")")
+            else
+                local b = GUI:GetBeneficiaryCount() or 0
+                btnText:SetText("무득분 (" .. math.max(1, n - b) .. ")")
+            end
 
-            -- 요약 정보 업데이트 (총수익, 개인당 골드, 파티당 골드 실시간 적용)
             GUI:UpdateSummary()
 
-            -- 텍스트 도출 모드가 열려있으면 텍스트 내용도 업데이트
             if GUI.exportEditbox and GUI.exportEditbox:GetParent():IsShown() then
                 local splitNumber = GUI:GetSplitNumber()
-                -- UpdateAllDistributeLabel과 동일한 체크박스 상태 읽기
-                local checkbox = GUI.checkAllDistributeButton or _G.IberisRaidAuctionCheckAllDistributeButton
-                local checkAllDistribute = true
-                if checkbox then
-                    local rawValue = checkbox:GetChecked()
-                    checkAllDistribute = (rawValue == true) or (rawValue == 1)
-                end
-                  GUI.exportEditbox:SetText(GenExport(Database:GetCurrentLedger()["items"], splitNumber, nil, checkAllDistribute))
+                GUI.exportEditbox:SetText(GenExport(Database:GetCurrentLedger()["items"], splitNumber, nil, GUI._checkAllDistributeState))
             end
         end)
-        GUI.checkAllDistributeButton = t  -- 전역 GUI 객체에 저장
-        _G.IberisRaidAuctionCheckAllDistributeButton = t  -- 전역 변수에도 저장
 
-        -- UI 폐기 — 항상 "모두 분배" 디폴트 (체크 상태도 강제 true)
-        t:SetChecked(true)
-        Database:SetConfig("checkAllDistribute", true)
-        t:Hide()
-    end
-    do
-        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        t:SetPoint("BOTTOMLEFT", f, 370, 76)
-        t:SetText(L["Distribute All"])
-        GUI.allDistributeLabel = t -- 라벨을 전역 GUI 객체에 저장하여 동적 업데이트 가능
-        t:Hide()  -- 라벨도 폐기
+        GUI.checkAllDistributeButton = btn
+        _G.IberisRaidAuctionCheckAllDistributeButton = btn
+        GUI.allDistributeLabel = btnText
+        GUI._updateDistBtnStyle = updateDistBtnStyle
 
-        -- 초기 라벨 업데이트 (체크박스 상태에 따라)
         C_Timer.After(0.1, function()
             UpdateAllDistributeLabel()
         end)
     end
     --
 
-    -- sum 총수익 총지출 최종수입 개인당 골드 파티당 골드 (분배인원 row 바로 밑, 한 줄)
+    -- sum 정산 라인 (2줄: "아이템 ... 분배금" / "개인당 ... 2명당") — 자동/시작/중지 라인 아래
     do
-        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -605)
+        local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -679)
         t:SetJustifyH("LEFT")
-
+        t:SetSpacing(7)  -- 2줄 사이 7px 간격
         self.summaryLabel = t
     end
 
-    -- export editbox
+    -- 최다지출자 / 내 경매지출 / 레이드 시작시 내 골드 (한 줄, 정산 라인 밑)
     do
-        local t = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-        t:SetPoint("TOPLEFT", f, 25, -30)
-        t:SetWidth(580)
-        t:SetHeight(360)
+        local row = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+        row:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -728)
+        row:SetJustifyH("LEFT")
+        row:SetSpacing(0)
+        row:SetText("")
+        self.bottomStatsLabel = row
+    end
 
-        -- 스크롤바 테마 (UIPanelScrollFrameTemplate의 자식 슬라이더)
+    -- export editbox: lootLogFrame.frame 과 동일 위치/크기/배경/스크롤바
+    do
+        -- lootLogFrame.frame: TOPLEFT 13, -50, w=611(컬럼합 591+20), h=460(15 row × 30 + 10)
+        local t = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        t:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -68)
+        t:SetWidth(611)
+        t:SetHeight(460)
+
+        -- ScrollFrame 에 BackdropTemplate mixin 후 ApplyFrame 으로 동일 배경
+        if BackdropTemplateMixin and not t.SetBackdrop then
+            Mixin(t, BackdropTemplateMixin)
+        end
+        if t.SetBackdrop then
+            ADDONSELF.theme:ApplyFrame(t)
+        end
+
+        -- 스크롤바: 박스 안쪽 우측으로 강제 배치 (lootLogFrame 과 동일 시각) + 테마 적용
         if t.ScrollBar then
+            t.ScrollBar:ClearAllPoints()
+            t.ScrollBar:SetPoint("TOPRIGHT",    t, "TOPRIGHT",    -8, -16)
+            t.ScrollBar:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", -8,  16)
             ADDONSELF.theme:ApplyScrollBar(t.ScrollBar)
         end
 
         local edit = CreateFrame("EditBox", nil, t)
         edit:SetWidth(580)
-        edit:SetHeight(320)
-        edit:SetPoint("TOPLEFT", t, 10, 0)
+        edit:SetHeight(440)
+        edit:SetPoint("TOPLEFT", t, "TOPLEFT", 6, -4)
         edit:SetAutoFocus(false)
         edit:EnableMouse(true)
         edit:SetMaxLetters(99999999)
@@ -1510,56 +890,6 @@ function GUI:Init()
         t:Hide()
     end
 
-    -- close btn (닫기 버튼)
-    -- do
-    --     local b = CreateFrame("Button", nil, f, "BackdropTemplate")
-    --     b:SetWidth(100)
-    --     b:SetHeight(28)
-    --     b:SetPoint("BOTTOMRIGHT", -40, 10)
-    --     b:SetText(L["Close"])
-
-    --     -- 현대적인 버튼 스타일 적용
-    --     b:SetBackdrop({
-    --         bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-    --         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-    --         tile = true,
-    --         tileSize = 16,
-    --         edgeSize = 12,
-    --         insets = { left = 2, right = 2, top = 2, bottom = 2 }
-    --     })
-    --     b:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-    --     b:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-    --     -- 텍스트 색상 흰색으로 설정
-    --     b:SetNormalFontObject("GameFontNormal")
-    --     b:SetHighlightFontObject("GameFontHighlight")
-    --     b:GetNormalFontObject():SetTextColor(1, 1, 1)
-    --     b:GetHighlightFontObject():SetTextColor(1, 1, 1)
-
-    --     -- 호버 효과
-    --     b:SetScript("OnEnter", function(self)
-    --         self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-    --         self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-    --     end)
-
-    --     b:SetScript("OnLeave", function(self)
-    --         self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-    --         self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-    --     end)
-
-    --     -- 눌렸을 때 효과
-    --     b:SetScript("OnMouseDown", function(self)
-    --         self:SetBackdropColor(0.1, 0.1, 0.15, 1.0)
-    --         self:SetBackdropBorderColor(0.3, 0.3, 0.4, 1.0)
-    --     end)
-
-    --     b:SetScript("OnMouseUp", function(self)
-    --         self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-    --         self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-    --     end)
-
-    --     b:SetScript("OnClick", function() f:Hide() end)
-    -- end
 
     -- clear btn (전체 지우기 버튼)
     do
@@ -1567,7 +897,7 @@ function GUI:Init()
         b:SetWidth(100)
         b:SetHeight(28)
         -- 우측 배열, 거래기록확인 좌측 5px 옆 (width 100, 거래기록확인 좌측 끝 -133 기준)
-        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -138, -524)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -138, -542)
         b:SetText("기록지우기")
 
         ADDONSELF.theme:ApplyButton(b)
@@ -1585,28 +915,22 @@ function GUI:Init()
         end)
     end
 
-    -- credit (+수익 버튼)
+    -- credit (+수익 버튼) — 테마 + 의도적 하늘색 강조
     do
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(60)
         b:SetHeight(28)
-        -- 아이템 리스트 (TOPLEFT 13, -50, 15행×30=450) 밑 + 반칸(14px) 간격
-        b:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -524)
+        -- 아이템 리스트 밑 + 반칸(14px) 간격
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -542)
         b:SetText("+" .. L["Credit"])
 
-        -- 현대적인 버튼 스타일 적용
-        b:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
+        ADDONSELF.theme:ApplyButton(b, {
+            bgColor     = { 0.05, 0.15, 0.25, 0.90 },
+            borderColor = { 0.10, 0.50, 0.85, 1.00 },
+            bgHover     = { 0.08, 0.22, 0.35, 0.95 },
+            borderHover = { 0.20, 0.65, 1.00, 1.00 },
+            bgPressed   = { 0.03, 0.10, 0.18, 1.00 },
         })
-        -- +수익: 진한 하늘색 테두리 + 폰트
-        b:SetBackdropColor(0.05, 0.15, 0.25, 0.9)
-        b:SetBackdropBorderColor(0.1, 0.5, 0.85, 1.0)
-
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
         local normalFontString = b:GetFontString()
@@ -1614,47 +938,27 @@ function GUI:Init()
             normalFontString:SetTextColor(0.4, 0.75, 1.0)
         end
 
-        b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.08, 0.22, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.2, 0.65, 1.0, 1.0)
-        end)
-        b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.05, 0.15, 0.25, 0.9)
-            self:SetBackdropBorderColor(0.1, 0.5, 0.85, 1.0)
-        end)
-        b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.03, 0.10, 0.18, 1.0)
-            self:SetBackdropBorderColor(0.05, 0.35, 0.6, 1.0)
-        end)
-        b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.08, 0.22, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.2, 0.65, 1.0, 1.0)
-        end)
-
         b:SetScript("OnClick", function()
             Database:AddCredit("")
-            FauxScrollFrame_SetOffset(self.lootLogFrame.scrollframe, 0) -- move to top
+            FauxScrollFrame_SetOffset(self.lootLogFrame.scrollframe, 0)
         end)
     end
 
-    -- debit (+지출 버튼)
+    -- debit (+지출 버튼) — 테마 + 의도적 주황 강조
     do
         local b = CreateFrame("Button", nil, f, "BackdropTemplate")
         b:SetWidth(60)
         b:SetHeight(28)
-        b:SetPoint("TOPLEFT", f, "TOPLEFT", 78, -524)
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", 78, -542)
         b:SetText("+" .. L["Debit"])
 
-        b:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true, tileSize = 16, edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
+        ADDONSELF.theme:ApplyButton(b, {
+            bgColor     = { 0.30, 0.18, 0.08, 0.90 },
+            borderColor = { 1.00, 0.55, 0.10, 1.00 },
+            bgHover     = { 0.40, 0.25, 0.10, 0.95 },
+            borderHover = { 1.00, 0.70, 0.25, 1.00 },
+            bgPressed   = { 0.20, 0.12, 0.05, 1.00 },
         })
-        -- +지출: 주황색 테두리 + 폰트
-        b:SetBackdropColor(0.30, 0.18, 0.08, 0.9)
-        b:SetBackdropBorderColor(1.0, 0.55, 0.1, 1.0)
-
         b:SetNormalFontObject("GameFontNormal")
         b:SetHighlightFontObject("GameFontHighlight")
         local normalFontString = b:GetFontString()
@@ -1662,30 +966,13 @@ function GUI:Init()
             normalFontString:SetTextColor(1.0, 0.7, 0.2)
         end
 
-        b:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.40, 0.25, 0.10, 0.95)
-            self:SetBackdropBorderColor(1.0, 0.7, 0.25, 1.0)
-        end)
-        b:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.30, 0.18, 0.08, 0.9)
-            self:SetBackdropBorderColor(1.0, 0.55, 0.1, 1.0)
-        end)
-        b:SetScript("OnMouseDown", function(self)
-            self:SetBackdropColor(0.20, 0.12, 0.05, 1.0)
-            self:SetBackdropBorderColor(0.6, 0.35, 0.05, 1.0)
-        end)
-        b:SetScript("OnMouseUp", function(self)
-            self:SetBackdropColor(0.40, 0.25, 0.10, 0.95)
-            self:SetBackdropBorderColor(1.0, 0.7, 0.25, 1.0)
-        end)
-
         b:SetScript("OnClick", function()
             Database:AddDebit(L["Compensation"], "", 0)
-            FauxScrollFrame_SetOffset(self.lootLogFrame.scrollframe, 0) -- move to top
+            FauxScrollFrame_SetOffset(self.lootLogFrame.scrollframe, 0)
         end)
     end
 
-    -- dropbox filter (아이템 등급) - 커스텀 드롭다운 (아이템 품질 필터링 드롭다운)
+    -- dropbox filter (아이템 등급) — 커스텀 드롭다운 (테마 적용)
     do
         local container = CreateFrame("Frame", nil, f)
         container:SetWidth(100)
@@ -1698,53 +985,19 @@ function GUI:Init()
         button:SetAllPoints(container)
         button:SetText("에픽이상 ▼")
 
-        -- 현대적인 버튼 스타일 적용
-        button:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        button:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-        button:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-
-        -- 텍스트 색상 흰색으로 설정
+        ADDONSELF.theme:ApplyButton(button)
         button:SetNormalFontObject("GameFontNormal")
-        local fontString = button:GetFontString()
-        if fontString then
-            fontString:SetTextColor(1, 1, 1)
+        do
+            local fs = button:GetFontString()
+            if fs then fs:SetTextColor(1, 1, 1) end
         end
-
-        -- 호버 효과
-        button:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(0.25, 0.25, 0.35, 0.95)
-            self:SetBackdropBorderColor(0.6, 0.6, 0.7, 1.0)
-        end)
-
-        button:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0.15, 0.15, 0.2, 0.9)
-            self:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
-        end)
 
         -- 드롭다운 메뉴 프레임
         local dropdown = CreateFrame("Frame", nil, container, "BackdropTemplate")
         dropdown:SetWidth(120)
         dropdown:SetPoint("TOP", container, "BOTTOM", 0, -2)
         dropdown:Hide()
-
-        -- 메뉴 스타일
-        dropdown:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        dropdown:SetBackdropColor(0.15, 0.15, 0.2, 0.95)
-        dropdown:SetBackdropBorderColor(0.4, 0.4, 0.5, 1.0)
+        ADDONSELF.theme:ApplyFrame(dropdown)
 
         -- 메뉴 아이템들 (RaidBook 패턴: 고급+ / 희귀+ / 영웅+)
         local qualityColors = {
@@ -1762,7 +1015,6 @@ function GUI:Init()
             return c and ("|c" .. c .. label .. "|r") or label
         end
 
-        -- 메뉴 아이템 생성
         for i, item in ipairs(menuItems) do
             local itemButton = CreateFrame("Button", nil, dropdown, "BackdropTemplate")
             itemButton:SetWidth(116)
@@ -1770,34 +1022,17 @@ function GUI:Init()
             itemButton:SetPoint("TOP", dropdown, "TOP", 0, -(i-1)*24)
             itemButton:SetText(coloredFilterText(item.value, item.text))
 
-            -- 메뉴 아이템 스타일
-            itemButton:SetBackdrop({
-                bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-                edgeFile = "",
-                tile = false,
-                tileSize = 0,
-                edgeSize = 0,
-                insets = { left = 0, right = 0, top = 0, bottom = 0 }
+            -- 메뉴 아이템: 테두리 투명 (메뉴 내부에서 호버만 시각 구분)
+            ADDONSELF.theme:ApplyButton(itemButton, {
+                borderColor = { 0, 0, 0, 0 },
+                borderHover = { 0, 0, 0, 0 },
             })
-            itemButton:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-
-            -- 텍스트 설정
             itemButton:SetNormalFontObject("GameFontNormalSmall")
-            local itemFontString = itemButton:GetFontString()
-                if itemFontString then
-                    itemFontString:SetTextColor(1, 1, 1)
-                end
+            do
+                local fs = itemButton:GetFontString()
+                if fs then fs:SetTextColor(1, 1, 1) end
+            end
 
-            -- 호버 효과
-            itemButton:SetScript("OnEnter", function(self)
-                self:SetBackdropColor(0.3, 0.3, 0.4, 0.9)
-            end)
-
-            itemButton:SetScript("OnLeave", function(self)
-                self:SetBackdropColor(0.1, 0.1, 0.15, 0.8)
-            end)
-
-            -- 클릭 이벤트
             itemButton:SetScript("OnClick", function()
                 button:SetText(coloredFilterText(item.value, item.text) .. " \226\150\188")
                 dropdown:Hide()
@@ -1813,7 +1048,6 @@ function GUI:Init()
                 dropdown:Hide()
             else
                 dropdown:Show()
-                -- 다른 드롭다운들 닫기
                 if GUI.customDropdowns then
                     for _, dd in pairs(GUI.customDropdowns) do
                         if dd ~= dropdown then
@@ -1824,11 +1058,9 @@ function GUI:Init()
             end
         end)
 
-        -- 전역 드롭다운 리스트에 추가
         if not GUI.customDropdowns then GUI.customDropdowns = {} end
         table.insert(GUI.customDropdowns, dropdown)
 
-        -- 다른 곳 클릭 시 닫기
         container:SetScript("OnHide", function()
             dropdown:Hide()
         end)
@@ -1839,9 +1071,6 @@ function GUI:Init()
         local labelMap = { [2] = "고급", [3] = "희귀", [4] = "영웅" }
         local label = labelMap[savedFilterLevel] or "희귀"
         button:SetText(coloredFilterText(savedFilterLevel, label) .. " \226\150\188")
-        if false then
-            button:SetText("legacy")
-        end
     end
 
     do
@@ -1953,6 +1182,47 @@ function GUI:Init()
             end)
         end
 
+        -- 스피커 컬럼: 아이템마다 공대 경보 송출 버튼 (RaidBook micColumnUpdate 그대로)
+        local micColumnUpdate = CreateCellUpdate(function(cellFrame, entry)
+            local btn = cellFrame.announceBtn
+            if not btn then
+                btn = CreateFrame("Button", nil, cellFrame)
+                btn:SetSize(18, 18)
+                btn:SetPoint("CENTER", cellFrame, "CENTER")
+                local tex = btn:CreateTexture(nil, "ARTWORK")
+                tex:SetAllPoints(btn)
+                tex:SetTexture("Interface\\Common\\VoiceChat-Speaker")
+                tex:SetVertexColor(1, 0.82, 0)
+                btn.tex = tex
+                btn:SetScript("OnEnter", function(self)
+                    self.tex:SetVertexColor(1, 1, 0.5)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetText("공대 경보로 알리기")
+                    GameTooltip:Show()
+                end)
+                btn:SetScript("OnLeave", function(self)
+                    self.tex:SetVertexColor(1, 0.82, 0)
+                    GameTooltip:Hide()
+                end)
+                cellFrame.announceBtn = btn
+            end
+
+            local detail = entry and entry.detail
+            local itemLink = nil
+            if detail and detail.type == "ITEM" and type(detail.item) == "string" and detail.item ~= "" then
+                _, itemLink = GetItemInfo(detail.item)
+            end
+            local enabled = detail and detail.type == "ITEM" and itemLink and itemLink ~= ""
+            btn:SetShown(enabled and true or false)
+            btn:SetEnabled(enabled)
+            btn:SetAlpha(enabled and 1 or 0.25)
+            if enabled then
+                btn:SetScript("OnClick", function() AnnounceAuction(itemLink) end)
+            else
+                btn:SetScript("OnClick", nil)
+            end
+        end)
+
         local iconUpdate = CreateCellUpdate(function(cellFrame, entry)
             local tooltip = self.itemtooltip
             if not (cellFrame.cellItemTexture) then
@@ -2037,6 +1307,10 @@ function GUI:Init()
                 cellFrame.textBox:SetAutoFocus(false)
                 cellFrame.textBox:SetScript("OnEscapePressed", cellFrame.textBox.ClearFocus)
                 popOnFocus(cellFrame.textBox)
+                ADDONSELF.theme:ApplyEditBox(cellFrame.textBox)
+                if cellFrame.textBox.SetBackdropColor then
+                    cellFrame.textBox:SetBackdropColor(0.02, 0.02, 0.03, 0.98)
+                end
             end
 
             cellFrame.textBox:Hide()
@@ -2140,6 +1414,10 @@ function GUI:Init()
                 cellFrame.textBox:SetScript("OnEscapePressed", cellFrame.textBox.ClearFocus)
                 AutoCompleteEditBox_SetAutoCompleteSource(cellFrame.textBox, autoCompleteRaidRoster)
                 popOnFocus(cellFrame.textBox)
+                ADDONSELF.theme:ApplyEditBox(cellFrame.textBox)
+                if cellFrame.textBox.SetBackdropColor then
+                    cellFrame.textBox:SetBackdropColor(0.02, 0.02, 0.03, 0.98)
+                end
             end
 
             cellFrame.textBox.customAutoCompleteFunction = function(editBox, newText, info)
@@ -2174,8 +1452,8 @@ function GUI:Init()
                         for _, rowData in ipairs(GUI.lootLogFrame.data) do
                             if rowData.realItemIdx == idx then
                                 rowData.beneficiary = n
-                                if rowData.cols and rowData.cols[2] then
-                                    rowData.cols[2].value = n
+                                if rowData.cols and rowData.cols[4] then
+                                    rowData.cols[4].value = n
                                 end
                                 break
                             end
@@ -2207,16 +1485,16 @@ function GUI:Init()
                 return true
             end
 
-            -- DEBIT 아이템의 경우 entry.beneficiary가 cols[2].value에서 설정되도록 보장
+            -- DEBIT 아이템의 경우 entry.beneficiary가 cols[4].value에서 설정되도록 보장
             if entry.type == "DEBIT" then
                 if not entry.beneficiary then
-                    entry.beneficiary = entry.cols[2].value or ""
+                    entry.beneficiary = entry.cols[4].value or ""
                 end
                 -- 빈 문자열인 경우 L["[Unknown]"]으로 설정하지 않고 그대로 유지
                 if entry.beneficiary == L["[Unknown]"] then
                     entry.beneficiary = ""
-                    if entry.cols[2] then
-                        entry.cols[2].value = ""
+                    if entry.cols[4] then
+                        entry.cols[4].value = ""
                     end
                 end
             end
@@ -2251,9 +1529,9 @@ function GUI:Init()
                         end
 
                         entry["beneficiary"] = t
-                        -- DEBIT 아이템의 경우 cols[2].value도 동기화 (ScrollingTable 데이터 일관성)
-                        if entry.cols and entry.cols[2] then
-                            entry.cols[2].value = t
+                        -- DEBIT 아이템의 경우 cols[4].value도 동기화 (ScrollingTable 데이터 일관성)
+                        if entry.cols and entry.cols[4] then
+                            entry.cols[4].value = t
                         end
 
                         -- ScrollingTable UI 데이터 강제 업데이트
@@ -2262,8 +1540,8 @@ function GUI:Init()
                             for _, rowData in ipairs(self.lootLogFrame.data) do
                                 if rowData.realItemIdx == idx then
                                     rowData.beneficiary = t
-                                    if rowData.cols and rowData.cols[2] then
-                                        rowData.cols[2].value = t
+                                    if rowData.cols and rowData.cols[4] then
+                                        rowData.cols[4].value = t
                                     end
                                     break
                                 end
@@ -2369,6 +1647,10 @@ function GUI:Init()
                 cellFrame.textBox:SetMaxLetters(10)
                 cellFrame.textBox:SetScript("OnChar", mustnumber)
                 cellFrame.textBox:SetScript("OnEnterPressed", clearAllFocus)
+                ADDONSELF.theme:ApplyEditBox(cellFrame.textBox)
+                if cellFrame.textBox.SetBackdropColor then
+                    cellFrame.textBox:SetBackdropColor(0.02, 0.02, 0.03, 0.98)
+                end
                 cellFrame.textBox:SetScript("OnTabPressed", clearAllFocus)
             end
             cellFrame.textBox:SetText(tostring(entry["cost"] or 0))
@@ -2499,28 +1781,39 @@ function GUI:Init()
             },
             {
                 ["name"] = "",
+                ["width"] = 26,
+                ["align"] = "CENTER",
+                ["DoCellUpdate"] = micColumnUpdate,
+            },
+            {
+                ["name"] = "순번",
+                ["width"] = 42,
+                ["align"] = "CENTER",
+            },
+            {
+                ["name"] = "",
                 ["width"] = 50,
                 ["DoCellUpdate"] = iconUpdate,
             },
             {
                 ["name"] = L["Entry"],
-                ["width"] = 250,
+                ["width"] = 220,
                 ["DoCellUpdate"] = entryUpdate,
             },
             {
                 ["name"] = L["Beneficiary"],
-                ["width"] = 150,
+                ["width"] = 120,
                 ["DoCellUpdate"] = beneficiaryUpdate,
             },
             {
                 ["name"] = L["Value"],
-                ["width"] = 100,
+                ["width"] = 111,
                 ["align"] = "RIGHT",
                 ["DoCellUpdate"] = valueUpdate,
             },
             {
                 ["name"] = L["No Beneficiary"],
-                ["width"] = 40,
+                ["width"] = 34,
                 ["align"] = "CENTER",
                 ["DoCellUpdate"] = CreateCellUpdate(function(cellFrame, entry, value)
                     -- 항상 체크박스 생성
@@ -2574,7 +1867,22 @@ function GUI:Init()
         }, 15, 30, nil, f)
 
         self.lootLogFrame.head:SetHeight(15)
-        self.lootLogFrame.frame:SetPoint("TOPLEFT", f, "TOPLEFT", 13, -50)
+        -- 거래기록 확인 버튼(TOPRIGHT -13)과 우측 정렬: TOPLEFT + TOPRIGHT 두 anchor 로 width 강제
+        self.lootLogFrame.frame:ClearAllPoints()
+        self.lootLogFrame.frame:SetPoint("TOPLEFT",  f, "TOPLEFT",  13, -68)
+        self.lootLogFrame.frame:SetPoint("TOPRIGHT", f, "TOPRIGHT", -13, -68)
+
+        -- 거래기록 ScrollFrame 을 lootLogFrame.frame 과 정확히 동일 사각형으로 강제 (lib-st 의 실제 width 사용)
+        if self.exportEditbox and self.exportEditbox:GetParent() then
+            local parent = self.exportEditbox:GetParent()
+            parent:ClearAllPoints()
+            parent:SetAllPoints(self.lootLogFrame.frame)
+        end
+
+        -- 헤더 ↔ 첫 row 간격: head BOTTOM 을 frame TOP 위로 10px 띄움
+        self.lootLogFrame.head:ClearAllPoints()
+        self.lootLogFrame.head:SetPoint("BOTTOMLEFT",  self.lootLogFrame.frame, "TOPLEFT",   4, 10)
+        self.lootLogFrame.head:SetPoint("BOTTOMRIGHT", self.lootLogFrame.frame, "TOPRIGHT", -4, 10)
 
         -- lib-st 외곽 프레임 + 스크롤바 테마
         if self.lootLogFrame.frame then
@@ -2582,6 +1890,38 @@ function GUI:Init()
         end
         if self.lootLogFrame.scrollframe and self.lootLogFrame.scrollframe.ScrollBar then
             ADDONSELF.theme:ApplyScrollBar(self.lootLogFrame.scrollframe.ScrollBar)
+        end
+
+        -- lib-st 자체 scrolltrough/scrolltroughborder 숨김 (이중 트랙 제거 — ApplyScrollBar 한 ScrollBar 만 남김)
+        if self.lootLogFrame.scrollframe then
+            local sf = self.lootLogFrame.scrollframe
+            for _, child in ipairs({ sf:GetChildren() }) do
+                if child ~= sf.ScrollBar then
+                    child:Hide()
+                end
+            end
+        end
+
+        -- row 배경 (ElvUI 풍 어두운 평면 + 청색 호버). alpha 키워 행 구분 강화.
+        if self.lootLogFrame.SetDefaultHighlightBlank then
+            self.lootLogFrame:SetDefaultHighlightBlank(0.06, 0.06, 0.08, 0.95)
+        end
+        if self.lootLogFrame.SetDefaultHighlight then
+            self.lootLogFrame:SetDefaultHighlight(0.10, 0.50, 0.85, 0.55)
+        end
+        -- lib-st 는 OnEnter/OnLeave 에서만 SetHighLightColor 호출 → 평소 highlight 가 default alpha 0 으로 row 배경 안 보임.
+        -- setup 직후 모든 row 에 GetDefaultHighlightBlank 강제 적용해서 어두운 톤 보이게.
+        if self.lootLogFrame.rows and self.lootLogFrame.SetHighLightColor and self.lootLogFrame.GetDefaultHighlightBlank then
+            local blank = self.lootLogFrame:GetDefaultHighlightBlank()
+            for i = 1, self.lootLogFrame.displayRows do
+                local row = self.lootLogFrame.rows[i]
+                if row then
+                    self.lootLogFrame:SetHighLightColor(row, blank)
+                end
+            end
+        end
+        if self.lootLogFrame.Refresh then
+            self.lootLogFrame:Refresh()
         end
 
         self.lootLogFrame:RegisterEvents({
@@ -2619,7 +1959,7 @@ function GUI:Init()
         b:SetWidth(60)  -- 절반으로 크기 축소
         b:SetHeight(28)
         -- 우측 배열, 같은 줄 -524 (요약출력 좌측 5px 옆, 아이템 리스트 우측 끝 -13 기준)
-        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -308, -524)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -308, -542)
         b:SetText("전체출력")  -- 텍스트 변경
         -- b:SetText(L["Report"] .. " :" .. RAID)
         b:RegisterForClicks("LeftButtonUp")
@@ -2636,19 +1976,6 @@ function GUI:Init()
             -- 전체출력 버튼은 항상 모든 정보를 표시 (checkf = false)
             -- 데이터베이스에서 최신 아이템 목록을 직접 가져옴
             local currentItems = Database:GetCurrentLedger()["items"]
-
-            -- DEBIT 아이템의 beneficiary 정보를 UI에서 가져와서 동기화
-            if GUI.lootTable then
-                for _, entry in ipairs(GUI.lootTable.data) do
-                    if entry.cols and entry.cols[2] and entry.cols[2].value and entry.realItemIdx then
-                        local dbItem = currentItems[entry.realItemIdx]
-                        if dbItem and dbItem.type == "DEBIT" then
-                            -- UI의 최신 beneficiary 값을 데이터베이스 아이템에 복사
-                            dbItem.beneficiary = entry.cols[2].value
-                        end
-                    end
-                end
-            end
 
             GenReport(currentItems, GUI:GetSplitNumber(), "RAID", false)
         end)
@@ -2689,19 +2016,6 @@ function GUI:Init()
             -- 데이터베이스에서 최신 아이템 목록을 직접 가져옴
             local currentItems = Database:GetCurrentLedger()["items"]
 
-            -- DEBIT 아이템의 beneficiary 정보를 UI에서 가져와서 동기화
-            if GUI.lootTable then
-                for _, entry in ipairs(GUI.lootTable.data) do
-                    if entry.cols and entry.cols[2] and entry.cols[2].value and entry.realItemIdx then
-                        local dbItem = currentItems[entry.realItemIdx]
-                        if dbItem and dbItem.type == "DEBIT" then
-                            -- UI의 최신 beneficiary 값을 데이터베이스 아이템에 복사
-                            dbItem.beneficiary = entry.cols[2].value
-                        end
-                    end
-                end
-            end
-
             GenReport(currentItems, GUI:GetSplitNumber(), "RAID", true)
         end)
 
@@ -2720,7 +2034,7 @@ function GUI:Init()
         b:SetWidth(120)
         b:SetHeight(28)
         -- 아이템 리스트 우측 끝(-13)에 정렬, +수익/+지출 과 동일 줄 (-524, 반칸 간격)
-        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -13, -524)
+        b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -13, -542)
         b:SetText(L["Export as text"])
 
         ADDONSELF.theme:ApplyButton(b)
@@ -2939,8 +2253,8 @@ function GUI:Init()
                 -- 데이터베이스에서 메시지 가져오기
                 local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
                     count = "--- %d",
-                    closed = "--- BIDDING CLOSED",
-                    resume = "--- NEW BID. RESUMING"
+                    closed = "--- 입찰 마감 ---",
+                    resume = "--- 신규 입찰 ! 재개합니다 ---"
                 })
 
                 -- 시작 메시지 전송
@@ -3031,8 +2345,8 @@ function GUI:Init()
                 -- 데이터베이스에서 재개 메시지 가져오기
                 local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
                     count = "--- %d",
-                    closed = "--- BIDDING CLOSED",
-                    resume = "--- NEW BID. RESUMING"
+                    closed = "--- 입찰 마감 ---",
+                    resume = "--- 신규 입찰 ! 재개합니다 ---"
                 })
 
                 SendChatMessage(messages.resume, "RAID_WARNING")
@@ -3061,148 +2375,6 @@ function GUI:Init()
         }
     end
 
-    -- 블랙리스트/화이트리스트 입력 UI — 폐기
-    if false then
-    do
-        -- 블랙리스트 레이블
-        local blacklistLabel = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        blacklistLabel:SetPoint("BOTTOMLEFT", f, 20, -17)
-        blacklistLabel:SetText("Black List")
-
-        -- 블랙리스트 입력창
-        local blacklistEdit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-        blacklistEdit:SetWidth(235)
-        blacklistEdit:SetHeight(25)
-        blacklistEdit:SetPoint("BOTTOMLEFT", f, 20, -42)
-        blacklistEdit:SetAutoFocus(false)
-        blacklistEdit:SetMultiLine(false)
-        blacklistEdit:SetMaxLetters(999999)
-        blacklistEdit:SetScript("OnEnterPressed", function(self)
-            self:ClearFocus()
-            SaveItemListToBlacklist(self:GetText())
-        end)
-        blacklistEdit:SetScript("OnEscapePressed", function(self)
-            self:ClearFocus()
-            -- 사용자가 필요한 경우에만 ESC로 초기화
-            -- 현재는 ESC를 눌러도 입력창은 유지됨
-        end)
-
-        -- 블랙리스트 저장 버튼
-        local blacklistSaveBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
-        blacklistSaveBtn:SetWidth(60)
-        blacklistSaveBtn:SetHeight(22)
-        blacklistSaveBtn:SetPoint("LEFT", blacklistEdit, "RIGHT", 5, 0)
-        blacklistSaveBtn:SetText("저장")
-
-        -- 버튼 스타일
-        blacklistSaveBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        blacklistSaveBtn:SetBackdropColor(0.6, 0.2, 0.2, 0.9)  -- 붉은색
-        blacklistSaveBtn:SetBackdropBorderColor(0.8, 0.4, 0.4, 1.0)  -- 붉은색 테두리
-
-        -- 버튼 텍스트 설정
-        blacklistSaveBtn:SetNormalFontObject("GameFontNormalSmall")
-        local blacklistFontString = blacklistSaveBtn:GetFontString()
-        if blacklistFontString then
-            blacklistFontString:SetTextColor(1, 1, 1)
-        end
-
-        blacklistSaveBtn:SetScript("OnClick", function()
-            SaveItemListToBlacklist(blacklistEdit:GetText())
-        end)
-
-        -- 화이트리스트 레이블
-        local whitelistLabel = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-        whitelistLabel:SetPoint("BOTTOMLEFT", f, 330, -17)
-        whitelistLabel:SetText("White List")
-
-        -- 화이트리스트 입력창
-        local whitelistEdit = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-        whitelistEdit:SetWidth(235)
-        whitelistEdit:SetHeight(25)
-        whitelistEdit:SetPoint("BOTTOMLEFT", f, 330, -42)
-        whitelistEdit:SetAutoFocus(false)
-        whitelistEdit:SetMultiLine(false)
-        whitelistEdit:SetMaxLetters(999999)
-        whitelistEdit:SetScript("OnEnterPressed", function(self)
-            self:ClearFocus()
-            SaveItemListToWhitelist(self:GetText())
-        end)
-        whitelistEdit:SetScript("OnEscapePressed", function(self)
-            self:ClearFocus()
-            -- 사용자가 필요한 경우에만 ESC로 초기화
-            -- 현재는 ESC를 눌러도 입력창은 유지됨
-        end)
-
-        -- 화이트리스트 저장 버튼
-        local whitelistSaveBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
-        whitelistSaveBtn:SetWidth(60)
-        whitelistSaveBtn:SetHeight(22)
-        whitelistSaveBtn:SetPoint("LEFT", whitelistEdit, "RIGHT", 5, 0)
-        whitelistSaveBtn:SetText("저장")
-
-        -- 버튼 스타일
-        whitelistSaveBtn:SetBackdrop({
-            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 16,
-            edgeSize = 12,
-            insets = { left = 2, right = 2, top = 2, bottom = 2 }
-        })
-        whitelistSaveBtn:SetBackdropColor(0.2, 0.2, 0.6, 0.9)  -- 푸른색
-        whitelistSaveBtn:SetBackdropBorderColor(0.4, 0.4, 0.8, 1.0)  -- 푸른색 테두리
-
-        -- 버튼 텍스트 설정
-        whitelistSaveBtn:SetNormalFontObject("GameFontNormalSmall")
-        local whitelistFontString = whitelistSaveBtn:GetFontString()
-        if whitelistFontString then
-            whitelistFontString:SetTextColor(1, 1, 1)
-        end
-
-        whitelistSaveBtn:SetScript("OnClick", function()
-            SaveItemListToWhitelist(whitelistEdit:GetText())
-        end)
-
-        -- GUI 객체에 저장
-        GUI.blacklistEdit = blacklistEdit
-        GUI.blacklistSaveBtn = blacklistSaveBtn
-        GUI.whitelistEdit = whitelistEdit
-        GUI.whitelistSaveBtn = whitelistSaveBtn
-
-        -- 현재 리스트 값 로드 및 표시
-        local function LoadCurrentLists()
-            -- 블랙리스트 현재 상태 표시
-            local blacklist = Database:GetConfigOrDefault("itemBlacklist", {})
-            if next(blacklist) then
-                local blacklistItems = {}
-                for item in pairs(blacklist) do
-                    table.insert(blacklistItems, item)
-                end
-                blacklistEdit:SetText(table.concat(blacklistItems, ", "))
-            end
-
-            -- 화이트리스트 현재 상태 표시
-            local whitelist = Database:GetConfigOrDefault("itemWhitelist", {})
-            if next(whitelist) then
-                local whitelistItems = {}
-                for item in pairs(whitelist) do
-                    table.insert(whitelistItems, item)
-                end
-                whitelistEdit:SetText(table.concat(whitelistItems, ", "))
-            end
-        end
-
-        -- 로드 후 현재 리스트 표시
-        LoadCurrentLists()
-    end
-    end -- end of if false (블랙/화이트리스트 폐기)
 
   
 end
@@ -3210,7 +2382,7 @@ end
 -- CLI에서 GUI 드롭다운 업데이트를 위해 호출하는 함수
 function GUI:UpdateAutoLootDropdown(value)
     -- value 파라미터는 무시하고 데이터베이스에서 직접 읽음
-    local dbValue = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_DISABLE)
+    local dbValue = Database:GetConfigOrDefault("autoaddloot", AUTOADDLOOT_TYPE_RAID)
     value = dbValue
     -- 버튼 텍스트 업데이트
     local button = nil
@@ -3266,6 +2438,7 @@ function GUI:UpdateRoundingDropdown(value)
     end
 end
 
+-- RaidBook RBGui.lua 5470-5494 그대로 차용 (라벨 "올분/무득분")
 function UpdateAllDistributeLabel()
     if not GUI.allDistributeLabel then
         return
@@ -3273,23 +2446,19 @@ function UpdateAllDistributeLabel()
 
     local totalMembers = tonumber(GUI.countEdit:GetText()) or 40
 
-    -- 여러 방법으로 checkAllDistributeButton 찾기
-    local checkAllDistribute = true
-    local checkbox = GUI.checkAllDistributeButton or _G.IberisRaidAuctionCheckAllDistributeButton
-
-    if checkbox then
-        local rawValue = checkbox:GetChecked()
-        checkAllDistribute = (rawValue == true) or (rawValue == 1)
-    end
+    local checkAllDistribute = GUI._checkAllDistributeState
+    if checkAllDistribute == nil then checkAllDistribute = true end
 
     if checkAllDistribute then
-        -- 모두 분배: 득자 포함
-        GUI.allDistributeLabel:SetText(L["Distribute All"] .. "(" .. totalMembers .. ")")
+        GUI.allDistributeLabel:SetText("올분 (" .. totalMembers .. ")")
     else
-        -- 모두 분배 해제: 득자 수 계산
         local beneficiaryCount = GUI:GetBeneficiaryCount()
         local actualMembers = math.max(1, totalMembers - beneficiaryCount)
-        GUI.allDistributeLabel:SetText(L["Distribute All"] .. "(" .. actualMembers .. ")")
+        GUI.allDistributeLabel:SetText("무득분 (" .. actualMembers .. ")")
+    end
+
+    if GUI._updateDistBtnStyle then
+        GUI._updateDistBtnStyle()
     end
 end
 
@@ -3437,117 +2606,4 @@ StaticPopupDialogs["IBERISRAIDAUCTION_DELETE_ITEM"] = {
     multiple = 0,
 }
 
--- 블랙리스트/화이트리스트 입력 UI 추가 (Init 함수 안으로 이동해야 함)
--- 아이템 리스트 파싱 함수
-local function ParseItemList(text)
-    local items = {}
-
-    -- 콤마로 먼저 분리
-    for itemPart in string.gmatch(text, "([^,]+)") do
-        -- 앞뒤 공백 제거 (내부 공백은 유지)
-        local cleanItem = strtrim(itemPart)
-        if cleanItem ~= "" then
-            table.insert(items, cleanItem)
-        end
-    end
-
-    return items
-end
-
--- 아이템 유효성 검증 함수
-local function ValidateItem(itemInput)
-    if not itemInput or itemInput == "" then
-        return false, "빈 입력값"
-    end
-
-    local trimmed = strtrim(itemInput)
-
-    -- 아이템 이름 확인 (한글 아이템명 지원 강화)
-    local name, link = GetItemInfo(trimmed)
-    if name then
-        return true, name  -- 항상 아이템 이름으로 저장
-    end
-
-    -- 게임에서 찾을 수 없는 아이템도 최소 길이 확인 후 이름으로 저장
-    -- 실제 검증은 드랍 시 필터링에서 처리
-    if string.len(trimmed) >= 2 then
-        return true, trimmed  -- 이름으로 그냥 저장 (실제 검증은 드랍 시)
-    else
-        return false, "너무 짧은 아이템명: " .. trimmed
-    end
-end
-
--- 블랙리스트 저장 함수
-function SaveItemListToBlacklist(text)
-    local items = ParseItemList(text)
-    if #items == 0 then
-        DEFAULT_CHAT_FRAME:AddMessage("저장할 아이템이 없습니다.", 1, 0, 0)
-        return
-    end
-
-    -- 기존 데이터를 비우고 새로 시작
-    local newBlacklist = {}
-    local addedCount = 0
-    local errorItems = {}
-
-    for _, item in ipairs(items) do
-        local isValid, normalizedItem = ValidateItem(item)
-        if isValid then
-            if not newBlacklist[normalizedItem] then
-                newBlacklist[normalizedItem] = true
-                addedCount = addedCount + 1
-            end
-        else
-            table.insert(errorItems, item)
-        end
-    end
-
-    Database:SetConfig("itemBlacklist", newBlacklist)
-
-    -- 결과 피드백
-    if addedCount > 0 then
-        DEFAULT_CHAT_FRAME:AddMessage(addedCount .. "개 아이템을 블랙리스트에 설정했습니다.", 0, 1, 0)
-    end
-
-    if #errorItems > 0 then
-        DEFAULT_CHAT_FRAME:AddMessage("오류 아이템: " .. table.concat(errorItems, ", "), 1, 0, 0)
-    end
-end
-
--- 화이트리스트 저장 함수
-function SaveItemListToWhitelist(text)
-    local items = ParseItemList(text)
-    if #items == 0 then
-        DEFAULT_CHAT_FRAME:AddMessage("저장할 아이템이 없습니다.", 1, 0, 0)
-        return
-    end
-
-    -- 기존 데이터를 비우고 새로 시작
-    local newWhitelist = {}
-    local addedCount = 0
-    local errorItems = {}
-
-    for _, item in ipairs(items) do
-        local isValid, normalizedItem = ValidateItem(item)
-        if isValid then
-            if not newWhitelist[normalizedItem] then
-                newWhitelist[normalizedItem] = true
-                addedCount = addedCount + 1
-            end
-        else
-            table.insert(errorItems, item)
-        end
-    end
-
-    Database:SetConfig("itemWhitelist", newWhitelist)
-
-    -- 결과 피드백
-    if addedCount > 0 then
-        DEFAULT_CHAT_FRAME:AddMessage(addedCount .. "개 아이템을 화이트리스트에 설정했습니다.", 0, 1, 0)
-    end
-
-    if #errorItems > 0 then
-        DEFAULT_CHAT_FRAME:AddMessage("오류 아이템: " .. table.concat(errorItems, ", "), 1, 0, 0)
-    end
-end
 

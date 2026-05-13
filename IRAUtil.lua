@@ -166,8 +166,13 @@ local calcavg = function(items, n, oncredit, ondebit, checkAllDistribute)
         avg = math.max( avg, 0)
         avg = math.floor( avg )
 
-        -- 절삭 단위 적용
-        local roundingLevel = (ADDONSELF and ADDONSELF.gui and ADDONSELF.gui.roundingLevel) or 2
+        -- 절삭 단위 적용 — SV 를 직접 읽음 (메인창 dropdown 폐기 후 GUI.roundingLevel 캐시 갱신 흐름이 끊겼음)
+        local roundingLevel
+        if ADDONSELF and ADDONSELF.db and ADDONSELF.db.GetConfigOrDefault then
+            roundingLevel = ADDONSELF.db:GetConfigOrDefault("roundinglevel", 2)
+        else
+            roundingLevel = (ADDONSELF and ADDONSELF.gui and ADDONSELF.gui.roundingLevel) or 2
+        end
 
         if roundingLevel == 0 then
             avg = math.floor(avg/10000)*10000  -- 골드 단위 절삭
@@ -647,7 +652,7 @@ ADDONSELF.genreport = function(items, n, channel, checkf)
                 isDebitItem = true
             end
 
-            if isDebitItem and entry.cols and entry.cols[2] then
+            if isDebitItem and entry.cols and entry.cols[4] then
                 -- 데이터베이스 아이템 찾기
                 local dbItem = nil
 
@@ -667,7 +672,7 @@ ADDONSELF.genreport = function(items, n, channel, checkf)
                 end
 
                 -- ScrollingTable에서 entry.beneficiary 직접 읽기 (데이터 동기화 후)
-                local currentUIValue = entry.beneficiary or entry.cols[2].value or ""
+                local currentUIValue = entry.beneficiary or entry.cols[4].value or ""
 
                 -- 빈 문자열이면 L["[Unknown]"]으로 변환하지 않고 그대로 사용
                 if currentUIValue == "" then

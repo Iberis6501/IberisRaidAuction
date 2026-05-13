@@ -61,11 +61,25 @@ hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self, button
     end
 end)
 
- 
+
 local ls_targetName = ""
 local ll_targetMoney = 0
 local playerItem = ""
-local targetItem = ""
+
+-- 거래 직후 CHAT_MSG_LOOT(획득 채팅)이 같은 아이템으로 한 줄 더 들어가는 것 방지 [id]=만료시각 (RaidBook 패턴)
+local tradeLootChatIgnoreIds = {}
+local function armTradeLootChatIgnore(itemLink, holdSec)
+    holdSec = holdSec or 30
+    local id = itemLink and tonumber(itemLink:match("item:(%d+)"))
+    if not id then return end
+    local exp = GetTime() + holdSec
+    tradeLootChatIgnoreIds[id] = exp
+    C_Timer.After(holdSec + 1, function()
+        if tradeLootChatIgnoreIds[id] == exp then
+            tradeLootChatIgnoreIds[id] = nil
+        end
+    end)
+end
 
 
 local AUTOADDLOOT_TYPE_ALL = 0
@@ -121,8 +135,17 @@ RegEvent("CHAT_MSG_LOOT", function(chatmsg)
         -- MRT_Debug("No valid loot event received.");
         return;
     end
+
+    -- 거래 직후 동일 itemID 중복 기록 방지 (RaidBook 패턴)
+    do
+        local id = tonumber(itemLink:match("item:(%d+)"))
+        local exp = id and tradeLootChatIgnoreIds[id]
+        if exp and GetTime() <= exp then
+            return
+        end
+    end
+
     -- if code reaches this point, we should have a valid looter and a valid itemLink
-    -- print(itemLink)
     for _ = 1, itemCount do
         Database:AddLoot(itemLink, 1, playerName, 0);
     end
@@ -247,63 +270,108 @@ local function truncGold(str)
   end
 end
 
--- 골드확인
-local function TS_UpdateMoney()
-  ll_targetMoney = truncGold(GetTargetTradeMoney())
+-- Player 측 거래 슬롯 6개 다 순회해서 itemLink 배열 수집 (RaidBook collectTradeSideItems 패턴)
+local playerItems = {}  -- 거래에 올린 모든 아이템 링크 배열
+local function collectPlayerTradeItems()
+    local items = {}
+    for slot = 1, 6 do
+        local name = GetTradePlayerItemInfo(slot)
+        if name then
+            local link = GetTradePlayerItemLink(slot)
+            if link then
+                table.insert(items, link)
+            end
+        end
+    end
+    return items
 end
 
--- 거래물품의 정보 처리
-function TS_UpdateItemInfo(id, unit, item)
-  local funcInfo = getglobal("GetTrade"..unit.."ItemInfo")
-  local funcLink = getglobal("GetTrade"..unit.."ItemLink")
 
-  local name, texture, numItems, quality, isUsable, enchantment
+-- 거래 완료/취소 처리 (다채널 + dedup + 멀티슬롯) — RaidBook 패턴
+local lastTradeCompleteTime = 0
+local function onTradeCompleteEvent()
+    -- 0.5초 이내 중복 호출 차단 (다채널 동시 발화 대비)
+    local now = GetTime()
+    if (now - lastTradeCompleteTime) < 0.5 then return end
+    lastTradeCompleteTime = now
 
-  name, texture, numItems, quality, enchantment = funcInfo(id)
-
-  if(not name) then
---   item = nil
-    return
-  end
-
-   playerItem = funcLink(id)
-
+    if (#playerItems > 0) and (GUI:GetCheckTradeButton()) and (ll_targetMoney ~= 0) then
+        -- 멀티슬롯: 첫 아이템에 전체 골드 기록, 나머지는 0g (마부인계 처리)
+        local channel = IsInRaid() and "RAID" or (IsInGroup() and "PARTY" or "SAY")
+        for i, link in ipairs(playerItems) do
+            local cost = (i == 1) and ll_targetMoney or 0
+            Database:AddLoot(link, 1, ls_targetName, cost, true)
+            armTradeLootChatIgnore(link, 30)
+        end
+        local firstItem = playerItems[1]
+        local notice
+        if #playerItems == 1 then
+            notice = "경매 알림 : " .. ls_targetName .. "님이 " .. firstItem .. "을 " .. ll_targetMoney .. "골에 구매하였습니다."
+        else
+            notice = "경매 알림 : " .. ls_targetName .. "님이 " .. firstItem .. " 외 " .. (#playerItems - 1) .. "개를 " .. ll_targetMoney .. "골에 구매하였습니다."
+        end
+        SendChatMessage(notice, channel)
+    end
+    playerItems = {}
+    playerItem = nil
+    ls_targetName = ""
+    ll_targetMoney = 0
 end
 
+local function onTradeCancelledEvent()
+    playerItems = {}
+    playerItem = nil
+    ls_targetName = ""
+    ll_targetMoney = 0
+end
+
+local function onUiTradeMessage(messageType, message)
+    local errorName = GetGameMessageInfo and GetGameMessageInfo(messageType)
+    if errorName == "ERR_TRADE_COMPLETE" then
+        onTradeCompleteEvent()
+    elseif errorName == "ERR_TRADE_CANCELLED" then
+        onTradeCancelledEvent()
+    end
+end
 
 RegEvent("UI_INFO_MESSAGE", function(messageType, message)
+    onUiTradeMessage(messageType, message)
+end)
 
-	local errorName, soundKitID, voiceID = GetGameMessageInfo(messageType);
+RegEvent("UI_ERROR_MESSAGE", function(messageType, message)
+    onUiTradeMessage(messageType, message)
+end)
 
-	if ( errorName=="ERR_TRADE_COMPLETE") then
+-- 일부 빌드에서만 존재; 없으면 RegisterEvent 실패할 수 있어 pcall
+pcall(function()
+    RegEvent("TRADE_SUCCESS", function()
+        onTradeCompleteEvent()
+    end)
+end)
 
-	    -- 여기서 애돈에 기록	
-	    if (playerItem~=nil) and (GUI:GetCheckTradeButton()) and (ll_targetMoney~=0)	then    
-	        Database:AddLoot(playerItem, 1, ls_targetName, ll_targetMoney, 1);
-		SendChatMessage("경매 알림 : " .. ls_targetName .. "님이 " .. playerItem .. "을 " .. ll_targetMoney .. "골에 구매하였습니다.", "RAID")
-	    end
-
-	    playerItem=nil;
-	    ls_targetName="";
-	    ll_targetMoney=0;
-	elseif ( errorName=="ERR_TRADE_CANCELLED") then
-
-    	    playerItem=nil;
-	    ls_targetName="";
-	    ll_targetMoney=0;
-	end
+-- 시스템 채팅 줄 (로케일 대비 짧은 키워드)
+RegEvent("CHAT_MSG_SYSTEM", function(msg)
+    if not msg or type(msg) ~= "string" then return end
+    if msg:find("거래") and (msg:find("완료") or msg:find("성공")) then
+        onTradeCompleteEvent()
+        return
+    end
+    if msg:lower():find("trade") and msg:lower():find("complete") then
+        onTradeCompleteEvent()
+        return
+    end
+    if msg:find("거래") and msg:find("취소") then
+        onTradeCancelledEvent()
+    end
 end)
 RegEvent("TRADE_SHOW", function()
     ls_targetName = GetUnitName("NPC") 
 end)
 RegEvent("TRADE_ACCEPT_UPDATE", function()
-    playerItem=nil
-    local cant
-    for cant = 6, 1, -1 do
-        TS_UpdateItemInfo(cant, "Player", playerItem)
-    end
-    if(playerItem~=nil) then
-        TS_UpdateMoney()
+    playerItems = collectPlayerTradeItems()
+    playerItem = playerItems[1]  -- 호환 위해 첫 아이템도 단일 변수에 유지
+    if #playerItems > 0 then
+        ll_targetMoney = truncGold(GetTargetTradeMoney())
     end
 end)
 
@@ -344,7 +412,7 @@ local function HandleCommand(msg)
         Print("[".. L["/ira"] .. " autoclear] Auto clear on dungeon enter (on/off)")
         Print("[".. L["/ira"] .. " scale] Adjust UI scale (0.7-1.5)")
     elseif cmd == "new" then
-        db:NewLedger()
+        Database:NewLedger()
     elseif cmd == "test" then
         if ADDONSELF.test and ADDONSELF.test.Generate then
             ADDONSELF.test:Generate()
@@ -357,8 +425,8 @@ local function HandleCommand(msg)
         -- /ira countdown만 입력했을 때 카운트다운 도움말 표시
         local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
             count = "--- %d",
-            closed = "--- BIDDING CLOSED",
-            resume = "--- NEW BID. RESUMING"
+            closed = "--- 입찰 마감 ---",
+            resume = "--- 신규 입찰 ! 재개합니다 ---"
         })
 
         Print("=== Countdown Messages Configuration ===")
@@ -405,8 +473,8 @@ local function HandleCommand(msg)
             -- 기본값으로 초기화
             Database:SetGlobalConfig("countdownmessages", {
                 count = "--- %d",
-                closed = "--- BIDDING CLOSED",
-                resume = "--- NEW BID. RESUMING"
+                closed = "--- 입찰 마감 ---",
+                resume = "--- 신규 입찰 ! 재개합니다 ---"
             })
             Print("Countdown messages have been reset to default values.")
 
@@ -422,8 +490,8 @@ local function HandleCommand(msg)
             if message and message ~= "" then
                 local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
                     count = "--- %d",
-                    closed = "--- BIDDING CLOSED",
-                    resume = "--- NEW BID. RESUMING"
+                    closed = "--- 입찰 마감 ---",
+                    resume = "--- 신규 입찰 ! 재개합니다 ---"
                 })
 
                 messages[what] = message

@@ -281,40 +281,7 @@ function db:AddLoot(item, count, beneficiary, cost, force)
         return
     end
 
-    -- 1단계: 블랙리스트 필터링 (force가 true가 아닌 경우만, 최우선 순위)
-    if force ~= true then
-        local _, itemName = GetItemInfo(item)
-        local itemIdentifier = itemName or tostring(GetItemInfoFromHyperlink(itemLink)) or itemLink
-
-        -- 블랙리스트 확인 (최우선)
-        local blacklist = self:GetConfigOrDefault("itemBlacklist", {})
-        if next(blacklist) then
-            for blacklistItem in pairs(blacklist) do
-                -- 부분 일치 또는 정확한 일치 확인 (아이템 이름으로)
-                if string.find(string.lower(itemIdentifier), string.lower(blacklistItem)) then
-                    return  -- 블랙리스트에 있음: 즉시 함수 종료
-                end
-            end
-        end
-
-        -- 2단계: 화이트리스트 확인
-        local whitelist = self:GetConfigOrDefault("itemWhitelist", {})
-        if next(whitelist) then
-            for whitelistItem in pairs(whitelist) do
-                if string.find(string.lower(itemIdentifier), string.lower(whitelistItem)) then
-                    -- 블랙리스트를 통과했고 화이트리스트에 있음: 등급 필터 건너뛰고 아이템 추가
-                    self:AddEntry(TYPE_CREDIT, {
-                        item = itemLink,
-                        type = DETAIL_TYPE_ITEM,
-                        count = count or 1,
-                    }, beneficiary, cost)
-                    return  -- 화이트리스트에 있음: 즉시 함수 종료
-                end
-            end
-        end
-    end
-
-    -- 3단계: 기존 등급 필터링 (블랙리스트/화이트리스트 모두 해당 안 될 때만)
+    -- 등급 필터링 (force=true 면 skip — 거래 자동기록 / Ctrl+클릭 수동추가)
     if not force then
         local filter = self:GetConfigOrDefault("filterlevel", LE_ITEM_QUALITY_UNCOMMON)
         if itemRarity < filter then
