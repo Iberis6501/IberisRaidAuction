@@ -165,6 +165,8 @@ function db:NewLedger()
     table.insert( ledgers, {
         ["time"] = time(),
         ["items"] = {},
+        -- 레이드 시작시 내 골드 (UpdateSummary 하단 라벨용). GetMoney() 단위는 copper.
+        ["_startMoneyCopper"] = GetMoney() or 0,
     } )
 
     while(#ledgers > MAX_LEDGER_COUNT) do
