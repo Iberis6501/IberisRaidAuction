@@ -1,4 +1,4 @@
-## Interface: 11508, 20505, 30404, 50502, 110200
+## Interface: 11508, 20505, 30404, 50502, 120005
 ## Title: |cff91d7f2IberisRaidAuction|r
 ## Title-koKR: |cff91d7f2IberisRaidAuction|r
 ## Notes: GDKP raid ledger — forked from RaidLedger by tg123 (Apache 2.0)

@@ -46,20 +46,32 @@ local RegEvent = ADDONSELF.regevent
 --     end
 -- end)
 
-hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self, button)
-
-    if GUI.mainframe:IsShown() and IsControlKeyDown() and button == "LeftButton" then
+-- 가방 아이템 Ctrl+좌클릭 → 장부에 등록.
+-- 클래식/구버전 본섭은 ContainerFrameItemButton_OnModifiedClick 글로벌 hook,
+-- 본섭 Midnight(12.0.x)에서 해당 글로벌이 제거되어 HandleModifiedItemClick으로 fallback.
+if _G.ContainerFrameItemButton_OnModifiedClick then
+    hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self, button)
+        if not (GUI.mainframe and GUI.mainframe:IsShown()) then return end
+        if not IsControlKeyDown() or button ~= "LeftButton" then return end
         local bag = self:GetParent():GetID()
         local slot = self:GetID()
         local itemLink = C_Container.GetContainerItemLink(bag, slot)
-
         if itemLink then
             Print(L["Item added"] .. " " .. itemLink)
             Database:AddLoot(itemLink, 1, "", 0, true)
-            -- GUI 업데이트는 AddLoot -> AddEntry -> OnLedgerItemsChange 콜백을 통해 자동으로 처리됨
         end
-    end
-end)
+    end)
+else
+    -- HandleModifiedItemClick은 modifier+LMB 시 호출됨. itemLocation이 있으면 가방/장비 슬롯 컨텍스트.
+    hooksecurefunc("HandleModifiedItemClick", function(itemLink, itemLocation)
+        if not itemLink or not itemLocation then return end
+        if not (GUI.mainframe and GUI.mainframe:IsShown()) then return end
+        if not IsControlKeyDown() then return end
+        if not itemLocation.IsBagAndSlot or not itemLocation:IsBagAndSlot() then return end
+        Print(L["Item added"] .. " " .. itemLink)
+        Database:AddLoot(itemLink, 1, "", 0, true)
+    end)
+end
 
 
 local ls_targetName = ""

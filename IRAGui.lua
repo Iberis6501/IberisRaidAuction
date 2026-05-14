@@ -2504,6 +2504,8 @@ RegEvent("ADDON_LOADED", function()
 
         local hooked = false
 
+        -- 본섭 Midnight(12.0.x)에서 RaidFrame_LoadUI 글로벌 제거됨 → 가드.
+        if _G.RaidFrame_LoadUI then
         hooksecurefunc("RaidFrame_LoadUI", function()
             if hooked then
                 return
@@ -2580,6 +2582,7 @@ RegEvent("ADDON_LOADED", function()
 
             hooked = true
         end)
+        end -- if _G.RaidFrame_LoadUI
     end
 end)
 
