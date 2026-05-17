@@ -7,6 +7,9 @@ local Print = ADDONSELF.print
 local deformat = ADDONSELF.deformat
 local RegEvent = ADDONSELF.regevent
 
+-- /ira purge: 두 단계 (preview → confirm). 모듈 전역에 대기 중인 인덱스 보관.
+local pendingPurge = nil
+
 -- SetItemRef는 비활성화하여 가방 클릭과 중복 방지
 -- hooksecurefunc("SetItemRef", function(link)
 --     -- 에러 처리: GUI가 초기화되지 않았을 경우
@@ -423,6 +426,8 @@ local function HandleCommand(msg)
         Print("[".. L["/ira"] .. " countdown] Configure countdown messages")
         Print("[".. L["/ira"] .. " autoclear] Auto clear on dungeon enter (on/off)")
         Print("[".. L["/ira"] .. " scale] Adjust UI scale (0.7-1.5)")
+        Print("[".. L["/ira"] .. " purge <itemID|이름>] 장부에서 특정 아이템 전체 삭제 (미리보기 후 confirm)")
+        Print("[".. L["/ira"] .. " blacklist] 자동 캡처 차단 목록 보기/편집 (부분일치)")
     elseif cmd == "new" then
         Database:NewLedger()
     elseif cmd == "test" then
@@ -432,6 +437,110 @@ local function HandleCommand(msg)
             Print("test module unavailable")
         end
     elseif cmd == "clear" then
+
+    elseif cmd == "blacklist" then
+        -- /ira blacklist                  → 목록 표시
+        -- /ira blacklist add <이름>       → 부분일치 항목 추가
+        -- /ira blacklist remove <이름>    → 제거
+        -- /ira blacklist clear            → 전부 비움
+        if not what then
+            local list = Database:GetItemBlacklist()
+            Print("=== 자동 캡처 블랙리스트 ===")
+            local count = 0
+            for entry in pairs(list) do
+                Print("  - " .. entry)
+                count = count + 1
+            end
+            if count == 0 then Print("  (비어 있음)") end
+            Print("사용법: /ira blacklist add <이름> | remove <이름> | clear")
+            return
+        end
+
+        local arg = (rest or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local list = Database:GetItemBlacklist()
+
+        if what == "add" then
+            if arg == "" then Print("이름을 입력하세요. 예: /ira blacklist add 황천의 쐐기"); return end
+            list[arg] = true
+            Database:SetItemBlacklist(list)
+            Print("[blacklist] 추가됨: " .. arg)
+        elseif what == "remove" or what == "rm" then
+            if arg == "" then Print("이름을 입력하세요"); return end
+            local removed = false
+            for key in pairs(list) do
+                if string.lower(key) == string.lower(arg) then
+                    list[key] = nil
+                    removed = true
+                end
+            end
+            if removed then
+                Database:SetItemBlacklist(list)
+                Print("[blacklist] 제거됨: " .. arg)
+            else
+                Print("[blacklist] 일치 없음: " .. arg)
+            end
+        elseif what == "clear" then
+            Database:SetItemBlacklist({})
+            Print("[blacklist] 전부 비움")
+        else
+            Print("사용법: /ira blacklist add <이름> | remove <이름> | clear")
+        end
+
+    elseif cmd == "purge" then
+        -- 미리보기 → 확인 2단계. 인자가 itemID(숫자)면 ID 매칭, 아니면 아이템 이름 부분일치.
+        if what == "confirm" then
+            if not pendingPurge or #pendingPurge == 0 then
+                Print("[purge] 대기 중인 작업 없음. 먼저 `/ira purge <itemID|이름>` 으로 미리보기")
+                return
+            end
+            local removed = Database:PurgeItemsByIndices(pendingPurge)
+            Print(string.format("[purge] %d개 항목 삭제 완료", removed))
+            pendingPurge = nil
+            return
+        end
+
+        if what == "cancel" then
+            pendingPurge = nil
+            Print("[purge] 대기 작업 취소")
+            return
+        end
+
+        local query = what or ""
+        if rest and rest ~= "" then
+            query = query .. " " .. rest
+        end
+        query = query:gsub("^%s+", ""):gsub("%s+$", "")
+
+        if query == "" then
+            Print("사용법: /ira purge <itemID|이름>   또는   /ira purge confirm / cancel")
+            return
+        end
+
+        local matches = Database:FindItemsByQuery(query)
+        if #matches == 0 then
+            Print("[purge] 일치하는 항목 없음: " .. query)
+            pendingPurge = nil
+            return
+        end
+
+        pendingPurge = {}
+        for _, m in ipairs(matches) do
+            table.insert(pendingPurge, m.idx)
+        end
+
+        Print(string.format("[purge] %d개 항목 일치 (\"%s\"):", #matches, query))
+        local previewMax = 5
+        for i = 1, math.min(previewMax, #matches) do
+            local m = matches[i]
+            local b = m.beneficiary
+            if b == nil or b == "" then b = "-" end
+            local idStr = m.itemID and string.format("id:%s", tostring(m.itemID)) or "id:?"
+            Print(string.format("  [#%d] %s {%s} (득자: %s)", m.idx, m.name, idStr, b))
+        end
+        if #matches > previewMax then
+            Print(string.format("  ... 외 %d개", #matches - previewMax))
+        end
+        Print("삭제 진행: /ira purge confirm    |   취소: /ira purge cancel")
 
     elseif cmd == "countdown" and not what then
         -- /ira countdown만 입력했을 때 카운트다운 도움말 표시

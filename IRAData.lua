@@ -3,6 +3,20 @@ local _, ADDONSELF = ...
 
 local RegEvent = ADDONSELF.regevent
 
+-- 자동 캡처(CHAT_MSG_LOOT) 제외 블랙리스트 기본값 — 폭풍우 요새 켈타스 P4 무기 페이즈 임시 아이템 8종.
+-- 부분 일치 매칭이라 정확한 풀네임 몰라도 일부만 입력하면 동작.
+-- 사용자는 /ira blacklist 또는 옵션 패널에서 추가/삭제 가능 (RaidLedgerBR 패턴).
+local DEFAULT_ITEM_BLACKLIST = {
+    ["황천매듭 장궁"]      = true,  -- Netherstrand Longbow (활)
+    ["황천의 쐐기"]        = true,  -- Netherstrand 화살
+    ["우주 에너지 주입기"] = true,  -- Cosmic Infuser (둔기)
+    ["붕괴의 지팡이"]      = true,  -- Staff of Disintegration (지팡이)
+    ["황폐의 도끼"]        = true,  -- Devastation (양손 도끼)
+    ["차원 절단기"]        = true,  -- Warp Slicer (한손 도검)
+    ["위상 변화의 보루"]   = true,  -- Phaseshift Bulwark (방패)
+    ["무한의 비수"]        = true,  -- Infinity Blade (단검)
+}
+
 -- 성능 개선: GetItemInfo 캐시 (개선된 버전)
 local itemInfoCache = {}
 local maxCacheSize = 1000
@@ -244,6 +258,57 @@ function db:RemoveEntry(idx)
     self:OnLedgerItemsChange()
 end
 
+-- query: itemID(숫자) 또는 아이템 이름 부분문자열. 현재 장부에서 매칭되는 ITEM CREDIT 인덱스/메타 반환.
+function db:FindItemsByQuery(query)
+    local ledger = self:GetCurrentLedger()
+    local result = {}
+    if not ledger or not ledger["items"] then return result end
+
+    local idNum = tonumber(query)
+    local lowerQuery = type(query) == "string" and string.lower(query) or nil
+
+    for i, item in ipairs(ledger["items"]) do
+        if item and item.detail and item.detail.type == "ITEM" and item.detail.item then
+            local match = false
+            local itemID = item.detail.reliableItemID
+            if idNum and itemID == idNum then
+                match = true
+            elseif lowerQuery and lowerQuery ~= "" then
+                local name = GetItemInfo(item.detail.item)
+                if name and string.find(string.lower(name), lowerQuery, 1, true) then
+                    match = true
+                end
+            end
+            if match then
+                local name = GetItemInfo(item.detail.item) or "?"
+                table.insert(result, { idx = i, itemID = itemID, name = name, beneficiary = item.beneficiary or "" })
+            end
+        end
+    end
+    return result
+end
+
+function db:PurgeItemsByIndices(indices)
+    local ledger = self:GetCurrentLedger()
+    if not ledger or not ledger["items"] then return 0 end
+
+    -- 큰 인덱스부터 제거해야 앞쪽 인덱스가 안 밀림
+    table.sort(indices, function(a, b) return a > b end)
+
+    local removed = 0
+    for _, idx in ipairs(indices) do
+        if ledger["items"][idx] then
+            table.remove(ledger["items"], idx)
+            removed = removed + 1
+        end
+    end
+
+    if removed > 0 then
+        self:OnLedgerItemsChange()
+    end
+    return removed
+end
+
 function db:AddCredit(reason, beneficiary, cost)
     self:AddEntry(TYPE_CREDIT, {
         ["displayname"] = reason
@@ -283,8 +348,11 @@ function db:AddLoot(item, count, beneficiary, cost, force)
         return
     end
 
-    -- 등급 필터링 (force=true 면 skip — 거래 자동기록 / Ctrl+클릭 수동추가)
+    -- 등급 필터링 + 블랙리스트 (force=true 면 skip — 거래 자동기록 / Ctrl+클릭 수동추가)
     if not force then
+        if self:IsItemBlacklisted(itemName, itemLink) then
+            return  -- 블랙리스트 부분일치 차단
+        end
         local filter = self:GetConfigOrDefault("filterlevel", LE_ITEM_QUALITY_UNCOMMON)
         if itemRarity < filter then
             return  -- 등급 필터에 의해 제외됨
@@ -344,6 +412,45 @@ end
 function db:SetGlobalConfig(key, value)
     local config = self:GetGlobalConfig()
     config[key] = value
+end
+
+-- ====== 자동 캡처 블랙리스트 ======
+-- 저장 위치: GlobalConfig.itemBlacklist (계정 전역, 캐릭터/장부 공유)
+-- 데이터 형태: { [이름] = true, ... }  부분일치 검사 (RaidLedgerBR 패턴)
+
+function db:GetItemBlacklist()
+    -- 첫 호출 시 기본값을 *복사*해서 주입 (DEFAULT 테이블 자체가 오염되지 않도록).
+    -- 사용자가 비워두면 빈 테이블이 저장돼 다음부터 빈 상태 유지.
+    local config = self:GetGlobalConfig()
+    if config.itemBlacklist == nil then
+        local copy = {}
+        for k, v in pairs(DEFAULT_ITEM_BLACKLIST) do copy[k] = v end
+        config.itemBlacklist = copy
+    end
+    return config.itemBlacklist
+end
+
+function db:IsItemBlacklisted(itemName, itemLink)
+    local list = self:GetItemBlacklist()
+    if type(list) ~= "table" or not next(list) then return false end
+    local target = itemName
+    if (not target or target == "") and itemLink then
+        target = GetItemInfo(itemLink) or itemLink
+    end
+    if not target or target == "" then return false end
+    local lower = string.lower(target)
+    for entry in pairs(list) do
+        if entry ~= "" then
+            if string.find(lower, string.lower(entry), 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function db:SetItemBlacklist(tbl)
+    self:SetGlobalConfig("itemBlacklist", tbl or {})
 end
 
 -- 전역 설정 강제 저장 함수

@@ -162,6 +162,64 @@ function Theme:ApplyEditBox(edit)
     edit:SetTextInsets(4, 4, 0, 0)
 end
 
+-- AutoCompleteEditBoxTemplate 호환 외형 적용.
+-- EditBox의 자체 region(텍스처)으로 외형 처리 → 형제 Frame 안 쓰고, HookScript 안 걸어도
+-- EditBox가 Hide되면 텍스처도 자동으로 같이 사라짐 (region 시각성은 부모 프레임에 종속).
+-- AutoComplete 스크립트 흐름(OnTextChanged/OnEditFocusGained/OnEditFocusLost)에 일절 손대지 않음.
+function Theme:ApplyAutoCompleteEditBox(edit)
+    if not edit then return end
+    if edit._iuiACThemed then return end
+    edit._iuiACThemed = true
+
+    -- InputBoxTemplate 텍스처 제거 (시각만 평면화)
+    for i = 1, edit:GetNumRegions() do
+        local r = select(i, edit:GetRegions())
+        if r and r:GetObjectType() == "Texture" then
+            r:SetTexture(nil)
+            r:Hide()
+        end
+    end
+
+    -- 배경: BACKGROUND 레이어 → 텍스트보다 아래 그려짐. EditBox region 이라 hide 자동 추적.
+    -- LEFT 는 cellFrame(parent) 에 clamp → textBox가 -X offset으로 옆 셀 침범해도 외형은 셀 안에만.
+    local parent = edit:GetParent()
+    local bg = edit:CreateTexture(nil, "BACKGROUND")
+    bg:SetPoint("LEFT", parent, "LEFT", 0, 0)
+    bg:SetPoint("RIGHT", edit, "RIGHT", 0, 0)
+    bg:SetPoint("TOP", edit, "TOP", 0, 0)
+    bg:SetPoint("BOTTOM", edit, "BOTTOM", 0, 0)
+    bg:SetColorTexture(0.02, 0.02, 0.03, 0.98)
+    edit._iuiBg = bg
+
+    -- 보더 4면: 1px 텍스처 (배경과 동일 clamp 규칙)
+    local bdc = self.colors.border
+    local function newBord()
+        local t = edit:CreateTexture(nil, "OVERLAY")
+        t:SetColorTexture(bdc[1], bdc[2], bdc[3], bdc[4])
+        return t
+    end
+    local top, btm, lft, rgt = newBord(), newBord(), newBord(), newBord()
+    top:SetPoint("LEFT", parent, "LEFT", 0, 0)
+    top:SetPoint("RIGHT", edit, "RIGHT", 0, 0)
+    top:SetPoint("TOP", edit, "TOP", 0, 0)
+    top:SetHeight(1)
+    btm:SetPoint("LEFT", parent, "LEFT", 0, 0)
+    btm:SetPoint("RIGHT", edit, "RIGHT", 0, 0)
+    btm:SetPoint("BOTTOM", edit, "BOTTOM", 0, 0)
+    btm:SetHeight(1)
+    lft:SetPoint("LEFT", parent, "LEFT", 0, 0)
+    lft:SetPoint("TOP", edit, "TOP", 0, 0)
+    lft:SetPoint("BOTTOM", edit, "BOTTOM", 0, 0)
+    lft:SetWidth(1)
+    rgt:SetPoint("TOP", edit, "TOP", 0, 0)
+    rgt:SetPoint("BOTTOM", edit, "BOTTOM", 0, 0)
+    rgt:SetPoint("RIGHT", edit, "RIGHT", 0, 0)
+    rgt:SetWidth(1)
+    edit._iuiBorders = { top, btm, lft, rgt }
+
+    edit:SetTextInsets(4, 4, 0, 0)
+end
+
 -- ScrollBar 양 끝 ▲▼ 버튼: ElvUI 풍 평면 + 화살표 글리프
 local function styleArrowBtn(btn, dir)
     if not btn or btn._iuiArrow then return end

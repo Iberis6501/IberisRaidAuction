@@ -89,8 +89,150 @@ local function build()
         UIDropDownMenu_SetText(dd, MODES[cur] or MODES[2])
     end)
 
+    -- ===== 자동 캡처 블랙리스트 (RaidLedgerBR 패턴, 입력/목록 분리) =====
+    y = y - 50
+
+    local blHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    blHeader:SetPoint("TOPLEFT", 16, y)
+    blHeader:SetText("자동 캡처 차단 목록")
+    y = y - 6
+
+    local blHint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    blHint:SetPoint("TOPLEFT", blHeader, "BOTTOMLEFT", 0, -2)
+    blHint:SetWidth(560); blHint:SetJustifyH("LEFT")
+    blHint:SetText("|cff909090아이템 이름 부분일치로 차단. 기본값: 폭풍우 요새 켈타스 P4 무기/쐐기 8종.|r")
+    y = y - 24
+
+    -- (1) 새 항목 추가 입력
+    local addLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    addLbl:SetPoint("TOPLEFT", 22, y)
+    addLbl:SetText("새 항목 추가:")
+    y = y - 22
+
+    local addEdit = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    addEdit:SetPoint("TOPLEFT", 28, y)
+    addEdit:SetSize(380, 24)
+    addEdit:SetAutoFocus(false)
+    addEdit:SetMaxLetters(120)
+    addEdit:SetScript("OnEscapePressed", addEdit.ClearFocus)
+
+    local addBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    addBtn:SetPoint("LEFT", addEdit, "RIGHT", 8, 0)
+    addBtn:SetSize(60, 22)
+    addBtn:SetText("추가")
+    y = y - 36
+
+    -- (2) 등록 항목 리스트 (스크롤 가능)
+    local listLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    listLbl:SetPoint("TOPLEFT", 22, y)
+    listLbl:SetText("등록된 아이템:")
+    y = y - 20
+
+    local listBg = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    listBg:SetPoint("TOPLEFT", 28, y)
+    listBg:SetSize(450, 180)
+    listBg:SetBackdrop({
+        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12, tile = false,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    listBg:SetBackdropColor(0, 0, 0, 0.45)
+    listBg:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, listBg, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 6, -6)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -28, 6)
+
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetSize(1, 1)
+    scrollFrame:SetScrollChild(scrollChild)
+    y = y - 188
+
+    -- 행 풀
+    local rows = {}
+    local ROW_H = 22
+
+    local function ensureRow(i)
+        local row = rows[i]
+        if row then return row end
+        row = CreateFrame("Frame", nil, scrollChild)
+        row:SetSize(400, ROW_H)
+        row:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -(i - 1) * (ROW_H + 1))
+
+        row.label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.label:SetJustifyH("LEFT")
+        row.label:SetTextColor(1, 1, 1)
+
+        row.del = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.del:SetSize(22, 20)
+        row.del:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        row.del:SetText("X")
+
+        rows[i] = row
+        return row
+    end
+
+    local function rebuildList()
+        local list = Database:GetItemBlacklist()
+        local items = {}
+        for entry in pairs(list) do table.insert(items, entry) end
+        table.sort(items)
+
+        local count = #items
+        scrollChild:SetHeight(math.max(1, count * (ROW_H + 1)))
+
+        for i = 1, math.max(count, #rows) do
+            local row = rows[i]
+            local name = items[i]
+            if name then
+                row = ensureRow(i)
+                row.label:SetText(name)
+                row.del:SetScript("OnClick", function()
+                    local cur = Database:GetItemBlacklist()
+                    cur[name] = nil
+                    Database:SetItemBlacklist(cur)
+                    rebuildList()
+                end)
+                row:Show()
+            elseif row then
+                row:Hide()
+            end
+        end
+    end
+
+    addBtn:SetScript("OnClick", function()
+        local v = (addEdit:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if v == "" then return end
+        local list = Database:GetItemBlacklist()
+        list[v] = true
+        Database:SetItemBlacklist(list)
+        addEdit:SetText("")
+        rebuildList()
+    end)
+    addEdit:SetScript("OnEnterPressed", function(self)
+        addBtn:Click()
+        self:ClearFocus()
+    end)
+
+    -- (3) 기본값 복원 버튼
+    local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    resetBtn:SetPoint("TOPLEFT", 28, y)
+    resetBtn:SetSize(110, 22)
+    resetBtn:SetText("기본값 복원")
+    resetBtn:SetScript("OnClick", function()
+        IberisRaidAuctionGlobalConfig = IberisRaidAuctionGlobalConfig or {}
+        IberisRaidAuctionGlobalConfig.itemBlacklist = nil
+        Database:GetItemBlacklist()  -- 다시 호출하면 기본값 재주입됨
+        rebuildList()
+    end)
+    y = y - 32
+
+    panel:HookScript("OnShow", rebuildList)
+
     -- 안내
-    y = y - 60
+    y = y - 16
     local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     hint:SetPoint("TOPLEFT", 16, y)
     hint:SetWidth(560); hint:SetJustifyH("LEFT")

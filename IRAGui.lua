@@ -249,7 +249,9 @@ function GUI:UpdateLootTableFromDatabase()
                 safeItemID = string.len(item.detail.item or "") .. "_" .. string.byte(item.detail.item or "", 1) .. "_" .. string.byte(item.detail.item or "", -1)
             end
 
-            local key = tostring(safeItemID) .. "_" .. beneficiary .. "_" .. normalizedCost
+            -- 동일 아이템이 여러 개 드랍됐을 때 각각을 개별 항목으로 표시.
+            -- 키에 ledger 인덱스를 포함시켜 항상 그룹당 1개가 되도록 함 (GDKP 분배 워크플로).
+            local key = tostring(safeItemID) .. "_" .. beneficiary .. "_" .. normalizedCost .. "_" .. i
 
             if not itemGroups[key] then
                 itemGroups[key] = {
@@ -996,6 +998,7 @@ function GUI:Init()
         local dropdown = CreateFrame("Frame", nil, container, "BackdropTemplate")
         dropdown:SetWidth(120)
         dropdown:SetPoint("TOP", container, "BOTTOM", 0, -2)
+        dropdown:SetFrameStrata("DIALOG")
         dropdown:Hide()
         ADDONSELF.theme:ApplyFrame(dropdown)
 
@@ -1127,6 +1130,7 @@ function GUI:Init()
             return data
         end
 
+        -- RaidBook autoCompleteRaidRoster 원본 그대로 (RBGui.lua:3541)
         local autoCompleteRaidRoster = function(text)
             local data = {}
 
@@ -1307,10 +1311,7 @@ function GUI:Init()
                 cellFrame.textBox:SetAutoFocus(false)
                 cellFrame.textBox:SetScript("OnEscapePressed", cellFrame.textBox.ClearFocus)
                 popOnFocus(cellFrame.textBox)
-                ADDONSELF.theme:ApplyEditBox(cellFrame.textBox)
-                if cellFrame.textBox.SetBackdropColor then
-                    cellFrame.textBox:SetBackdropColor(0.02, 0.02, 0.03, 0.98)
-                end
+                -- 셀 EditBox는 RaidBook 기본 InputBoxTemplate 외형 유지 (theme 미적용)
             end
 
             cellFrame.textBox:Hide()
@@ -1406,6 +1407,7 @@ function GUI:Init()
         local beneficiaryUpdate = CreateCellUpdate(function(cellFrame, entry, idx)
 
             if not (cellFrame.textBox) then
+                -- RaidBook RBGui.lua:4008-4015 와 동일한 셀 EditBox 셋업
                 cellFrame.textBox = CreateFrame("EditBox", nil, cellFrame, "InputBoxTemplate,AutoCompleteEditBoxTemplate")
                 cellFrame.textBox:SetPoint("CENTER", cellFrame, "CENTER", -20, 0)
                 cellFrame.textBox:SetWidth(120)
@@ -1414,10 +1416,6 @@ function GUI:Init()
                 cellFrame.textBox:SetScript("OnEscapePressed", cellFrame.textBox.ClearFocus)
                 AutoCompleteEditBox_SetAutoCompleteSource(cellFrame.textBox, autoCompleteRaidRoster)
                 popOnFocus(cellFrame.textBox)
-                ADDONSELF.theme:ApplyEditBox(cellFrame.textBox)
-                if cellFrame.textBox.SetBackdropColor then
-                    cellFrame.textBox:SetBackdropColor(0.02, 0.02, 0.03, 0.98)
-                end
             end
 
             cellFrame.textBox.customAutoCompleteFunction = function(editBox, newText, info)
