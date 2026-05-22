@@ -251,14 +251,7 @@ function Theme:ApplyScrollBar(bar)
 
     bar:SetWidth(10)
 
-    -- 트랙 백그라운드
-    if not bar._track then
-        local track = bar:CreateTexture(nil, "BACKGROUND")
-        track:SetAllPoints(bar)
-        track:SetTexture(WHITE8X8)
-        track:SetVertexColor(0.05, 0.05, 0.05, 0.7)
-        bar._track = track
-    end
+    -- 트랙 백그라운드 — 의도적으로 미생성 (스크롤바 뒤 진한 배경 제거)
 
     -- 썸 (드래그 손잡이)
     if thumb then

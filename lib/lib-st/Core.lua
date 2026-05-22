@@ -19,9 +19,8 @@ do
 
 	local ScrollPaneBackdrop = {
 		bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
-		-- edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", -- rabies
 		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-		tile = true, tileSize = 16, edgeSize = 1,
+		tile = false, tileSize = 32, edgeSize = 1,
 		insets = { left = 0, right = 0, top = 0, bottom = 0 }
 	};
 
@@ -35,7 +34,7 @@ do
 		for _, col in pairs(self.cols) do
 			width = width + col.width;
 		end
-		self.frame:SetWidth(width+20);
+		self.frame:SetWidth(width+42);
 		self:Refresh();
 	end
 
@@ -578,6 +577,9 @@ do
 	local function SetData (self, data, isMinimalDataformat)
 		self.isMinimalDataformat = isMinimalDataformat;
 		self.data = data;
+		-- Data rows are rebuilt wholesale by IberisRaidAuction. Reset the cached row-order map
+		-- so same-sized replacements do not keep pointing at the previous ordering.
+		self.sorttable = nil;
 		self:SortData();
 	end
 
@@ -718,8 +720,7 @@ do
 		};
 		st.data = {};
 
-		f:SetBackdrop(ScrollPaneBackdrop);
-		f:SetBackdropColor(0.1,0.1,0.1);
+		f:SetBackdrop(nil);
 
 		-- build scroll frame
 		local scrollframe = CreateFrame("ScrollFrame", nil, f, "FauxScrollFrameTemplate");
@@ -730,12 +731,12 @@ do
 		end);
 
 		scrollframe:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -4);
-		scrollframe:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -26, 3);
+		scrollframe:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -36, 3);
 
 		local scrolltrough = CreateFrame("Frame", nil, scrollframe);
-		scrolltrough:SetWidth(17);
-		scrolltrough:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -3);
-		scrolltrough:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -4, 4);
+		scrolltrough:SetWidth(15);
+		scrolltrough:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -3);
+		scrolltrough:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 4);
 		scrolltrough.background = scrolltrough:CreateTexture(nil, "BACKGROUND");
 		scrolltrough.background:SetAllPoints(scrolltrough);
 		scrolltrough.background:SetColorTexture(0.05, 0.05, 0.05, 1.0);
@@ -745,7 +746,7 @@ do
 		scrolltroughborder:SetPoint("BOTTOMRIGHT", scrolltrough, "BOTTOMLEFT");
 		scrolltroughborder.background = scrolltrough:CreateTexture(nil, "BACKGROUND");
 		scrolltroughborder.background:SetAllPoints(scrolltroughborder);
-		scrolltroughborder.background:SetColorTexture(0.5, 0.5, 0.5, 1.0);
+		scrolltroughborder.background:SetColorTexture(0.05, 0.05, 0.05, 0);
 
 		st.Refresh = function(self)
 			FauxScrollFrame_Update(scrollframe, #st.filtered, st.displayRows, st.rowHeight);

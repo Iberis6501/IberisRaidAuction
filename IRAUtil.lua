@@ -2,41 +2,144 @@ local _, ADDONSELF = ...
 
 local L = ADDONSELF.L
 
-ADDONSELF.print = function(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|CFFFF0000<|r|CFFFFD100경매 장부|r|CFFFF0000>|r"..(msg or "nil"))
+--- TOC Version (Retail/Anniversary: C_AddOns.GetAddOnMetadata, 구 클라: GetAddOnMetadata)
+local function GetIberisRaidAuctionAddonVersion()
+    local n = (ADDONSELF.addonName) or "IberisRaidAuction"
+    if C_AddOns and C_AddOns.GetAddOnMetadata then
+        local v = C_AddOns.GetAddOnMetadata(n, "Version")
+        if v and v ~= "" then
+            return v
+        end
+    end
+    if GetAddOnMetadata then
+        local v = GetAddOnMetadata(n, "Version")
+        if v and v ~= "" then
+            return v
+        end
+    end
+    return "1.00"
+end
+ADDONSELF.GetAddOnVersion = GetIberisRaidAuctionAddonVersion
+
+-- 마력추출 인계 득자: 표시·그룹핑은 *마력추출* 로 통일 (예전 한쪽만 * 인 저장값 호환)
+function ADDONSELF.NormalizeDisenchantHandoffBeneficiary(s)
+    if type(s) ~= "string" or s == "" then
+        return s
+    end
+    if s == "*마력추출" or s == "*마력추출*" then
+        return "*마력추출*" -- 예전 한쪽만 * 인 저장값·표시 통일
+    end
+    return s
 end
 
-local function GetMoneyStringL(money, separateThousands)
-	local goldString, silverString, copperString;
-	local gold = floor(money / (COPPER_PER_SILVER * SILVER_PER_GOLD));
-	local silver = floor((money - (gold * COPPER_PER_SILVER * SILVER_PER_GOLD)) / COPPER_PER_SILVER);
-	local copper = mod(money, COPPER_PER_SILVER);
+function ADDONSELF.FormatBeneficiaryForDisplay(s)
+    return ADDONSELF.NormalizeDisenchantHandoffBeneficiary(s)
+end
 
-    if (separateThousands) then
-        goldString = FormatLargeNumber(gold)..GOLD_AMOUNT_SYMBOL;
+local function GetLedgerWinnerForCount(item)
+    local getter = ADDONSELF.GetLedgerWinnerName
+    local raw = getter and getter(item) or item and (item.winner or item.beneficiary) or ""
+    return ADDONSELF.NormalizeDisenchantHandoffBeneficiary(raw or "")
+end
+
+local function GetLedgerDisplayBeneficiaryName(item)
+    local getter = ADDONSELF.GetLedgerDisplayBeneficiary
+    local raw = getter and getter(item) or item and item.beneficiary or ""
+    return ADDONSELF.NormalizeDisenchantHandoffBeneficiary(raw or "")
+end
+
+function ADDONSELF.IsDisenchantHandoffBeneficiary(s)
+    return ADDONSELF.NormalizeDisenchantHandoffBeneficiary(s) == "*마력추출*"
+end
+
+ADDONSELF.print = function(msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|CFFFF0000<|r|CFFFFD100IberisRaidAuction|r|CFFFF0000>|r "..(msg or "nil"))
+end
+
+-- 레이드 경보 영역(공대장 경보와 동일한 프레임)에 표시
+ADDONSELF.raidWarningNotice = function(msg)
+    if not msg or msg == "" then return end
+    if RaidNotice_AddMessage and RaidWarningFrame then
+        local c = (ChatTypeInfo and ChatTypeInfo.RAID_WARNING) or { r = 1, g = 0.85, b = 0, a = 1 }
+        RaidNotice_AddMessage(RaidWarningFrame, msg, c)
     else
-        goldString = gold..GOLD_AMOUNT_SYMBOL;
+        DEFAULT_CHAT_FRAME:AddMessage(msg)
     end
-    silverString = silver..SILVER_AMOUNT_SYMBOL;
-    copperString = copper..COPPER_AMOUNT_SYMBOL;
+end
 
-	local moneyString = "";
-	local separator = "";
-	if ( gold > 0 ) then
-		moneyString = goldString;
-		separator = " ";
-	end
-	if ( silver > 0 ) then
-		moneyString = moneyString..separator..silverString;
-		separator = " ";
-	end
-	if ( copper > 0 or moneyString == "" ) then
-		moneyString = moneyString..separator..copperString;
-	end
-	
---	moneyString = money/10000.0;
+-- 화면 상단 짧은 토스트(채팅을 잘 안 볼 때 안내용). 연속 호출 시 타이머만 갱신됨.
+local iraToastFrame
+local iraToastExpireSeq = 0
 
-	return moneyString;
+-- tone: "success"(녹색), "warn"(황색), "danger"·nil = 빨간 테두리(거절·오류 안내)
+function ADDONSELF.showToast(msg, holdSec, tone)
+    if not msg or msg == "" then
+        return
+    end
+    holdSec = tonumber(holdSec) or 4.5
+    if not iraToastFrame then
+        iraToastFrame = CreateFrame("Frame", "IberisRaidAuctionToastFrame", UIParent, "BackdropTemplate")
+        iraToastFrame:SetSize(440, 88)
+        iraToastFrame:SetPoint("TOP", UIParent, "TOP", 0, -96)
+        iraToastFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        iraToastFrame:SetFrameLevel(200)
+        iraToastFrame:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true,
+            tileSize = 16,
+            edgeSize = 14,
+            insets = { left = 10, right = 10, top = 10, bottom = 10 },
+        })
+        iraToastFrame:EnableMouse(false)
+        local fs = iraToastFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        fs:SetPoint("TOPLEFT", 14, -12)
+        fs:SetPoint("BOTTOMRIGHT", -14, 12)
+        fs:SetJustifyH("CENTER")
+        fs:SetJustifyV("MIDDLE")
+        fs:SetWordWrap(true)
+        fs:SetSpacing(2)
+        iraToastFrame.text = fs
+        iraToastFrame:Hide()
+    end
+    if tone == "success" then
+        iraToastFrame:SetBackdropColor(0.06, 0.14, 0.09, 0.94)
+        iraToastFrame:SetBackdropBorderColor(0.35, 0.92, 0.48, 1)
+    elseif tone == "warn" then
+        iraToastFrame:SetBackdropColor(0.12, 0.1, 0.04, 0.94)
+        iraToastFrame:SetBackdropBorderColor(1, 0.78, 0.22, 1)
+    else
+        -- danger (또는 tone 미지정): 주황이 아닌 명확한 적색 테두리
+        iraToastFrame:SetBackdropColor(0.16, 0.05, 0.05, 0.95)
+        iraToastFrame:SetBackdropBorderColor(0.95, 0.18, 0.18, 1)
+    end
+    iraToastFrame.text:SetText(msg)
+    iraToastFrame:Show()
+    iraToastExpireSeq = iraToastExpireSeq + 1
+    local seq = iraToastExpireSeq
+    C_Timer.After(holdSec, function()
+        if seq == iraToastExpireSeq and iraToastFrame then
+            iraToastFrame:Hide()
+        end
+    end)
+end
+
+local function FormatGoldComma(n)
+    local s = tostring(math.floor(n))
+    while true do
+        local k
+        s, k = s:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+        if k == 0 then break end
+    end
+    return s
+end
+
+local function GetMoneyStringL(money)
+	local gold = math.floor(money)
+	if gold > 0 then
+		return FormatGoldComma(gold) .. "골드"
+	end
+	return "0골드"
 end
 
 local function SendToCurrrentChannel(msg)
@@ -82,8 +185,9 @@ local calcavg = function(items, n, oncredit, ondebit, checkAllDistribute)
         local beneficiaries = {}
         for _, item in pairs(items or {}) do
             -- CREDIT 아이템만 득자 계산에서 제외
-            if item.type == "CREDIT" and item.noBeneficiary ~= true and item.beneficiary and item.beneficiary ~= "" and item.cost and item.cost > 0 then
-                beneficiaries[item.beneficiary] = true
+            local winner = GetLedgerWinnerForCount(item)
+            if item.type == "CREDIT" and item.noBeneficiary ~= true and winner ~= "" and item.cost and item.cost > 0 then
+                beneficiaries[winner] = true
             end
         end
         local actualBeneficiaryCount = 0
@@ -110,7 +214,6 @@ local calcavg = function(items, n, oncredit, ondebit, checkAllDistribute)
         local ct = item["costtype"] or "GOLD"
 
         if t == "CREDIT" then
-            c = math.floor( c * 10000 )
             item["costcache"] = c
             revenue = revenue + c
             includedCredits = includedCredits + 1
@@ -125,7 +228,6 @@ local calcavg = function(items, n, oncredit, ondebit, checkAllDistribute)
                 end
         elseif t == "DEBIT" then
               if ct == "GOLD" then
-                c = math.floor( c * 10000 )
                 expense = expense + c
                 item["costcache"] = c
                   ondebit(item, c)
@@ -164,22 +266,7 @@ local calcavg = function(items, n, oncredit, ondebit, checkAllDistribute)
     if saltN > 0 then
         avg = 1.0 * profit / saltN
         avg = math.max( avg, 0)
-        avg = math.floor( avg )
-
-        -- 절삭 단위 적용 — SV 를 직접 읽음 (메인창 dropdown 폐기 후 GUI.roundingLevel 캐시 갱신 흐름이 끊겼음)
-        local roundingLevel
-        if ADDONSELF and ADDONSELF.db and ADDONSELF.db.GetConfigOrDefault then
-            roundingLevel = ADDONSELF.db:GetConfigOrDefault("roundinglevel", 2)
-        else
-            roundingLevel = (ADDONSELF and ADDONSELF.gui and ADDONSELF.gui.roundingLevel) or 2
-        end
-
-        if roundingLevel == 0 then
-            avg = math.floor(avg/10000)*10000  -- 골드 단위 절삭
-        elseif roundingLevel == 1 then
-            avg = math.floor(avg/100)*100      -- 실버 단위 절삭
-        -- else: 절삭 없음 (기존 avg 값 유지)
-        end
+        avg = math.floor( avg )  -- 골드 단위 절삭
     end
 
     do
@@ -199,7 +286,6 @@ local calcavg = function(items, n, oncredit, ondebit, checkAllDistribute)
 end
 
 ADDONSELF.calcavg = calcavg
-ADDONSELF.GetMoneyStringL = GetMoneyStringL
 
 
 local function GenExportLine(item, c)
@@ -208,7 +294,8 @@ local function GenExportLine(item, c)
         return ""
     end
 
-    local l = item["beneficiary"] or L["[Unknown]"]
+    local rawB = GetLedgerDisplayBeneficiaryName(item)
+    local l = (not rawB or rawB == "") and L["[Unknown]"] or ADDONSELF.FormatBeneficiaryForDisplay(rawB)
     local i = item["detail"]["item"] or ""
     local d = item["detail"]["displayname"] or ""
     local t = item["type"]
@@ -233,15 +320,13 @@ local function GenExportLine(item, c)
     return s
 end
 
+-- IRA_UI 양식 거래기록 (자동 캡처 [아이템] / 수동 [+수익] / [무득 아이템] / [+지출] / 요약)
 ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
 
-    -- checkAllDistribute 파라미터 타입 확인 및 정규화
-    -- 숫자가 전달되면 true로 처리 (GUI에서 splitNumber를 전달하는 경우)
     if type(checkAllDistribute) == "number" then
         checkAllDistribute = true
     end
 
-    -- 외부에서 전달받은 checkAllDistribute 값으로 임시 설정
     local originalCheckAllDistribute = nil
     if checkAllDistribute ~= nil and ADDONSELF and ADDONSELF.db and ADDONSELF.db.GetConfigOrDefault and ADDONSELF.db.SetConfig then
         originalCheckAllDistribute = ADDONSELF.db:GetConfigOrDefault("checkAllDistribute", true)
@@ -251,12 +336,11 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
     -- 실제 분배 인원 계산 (calcavg와 동일한 로직)
     local splitCount = n
     if not checkAllDistribute then
-        -- 실제 득자 수 계산 (CREDIT 아이템만)
         local beneficiaries = {}
         for _, item in pairs(items or {}) do
-            -- CREDIT 아이템만 득자 계산에서 제외
-            if item.type == "CREDIT" and item.noBeneficiary ~= true and item.beneficiary and item.beneficiary ~= "" and item.cost and item.cost > 0 then
-                beneficiaries[item.beneficiary] = true
+            local winner = GetLedgerWinnerForCount(item)
+            if item.type == "CREDIT" and item.noBeneficiary ~= true and winner ~= "" and item.cost and item.cost > 0 then
+                beneficiaries[winner] = true
             end
         end
         local actualBeneficiaryCount = 0
@@ -266,36 +350,19 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
         splitCount = math.max(n - actualBeneficiaryCount, 0)
     end
 
-    local s = "Raid Ledger BR" .. CRLF
-    s = s .. CRLF
-
-    -- 텍스트 도출에서도 roundingLevel을 적용해야 함 (genreport와 동일)
-    local roundingLevel = (ADDONSELF and ADDONSELF.gui and ADDONSELF.gui.roundingLevel) or 2
-
-    -----------------------------------
-
-    -- NOTE: noBeneficiary 필터링을 제거하고 원본 items 사용
-    -- 수익 계산에는 모든 CREDIT 아이템이 포함되어야 함
-    -- noBeneficiary는 분산 계산(divisor)에만 영향을 줌
     local filteredItems = items
-
-    local lines = {}
     local grp = {}
     local looternames = "득자 : "
-    local lootercount = 0
-    local s = ""  -- s 변수 초기화
 
-    -- 전달받은 checkAllDistribute 파라미터 사용 (GUI와 동일하게)
-  -- checkAllDistribute 파라미터가 nil이면 checkf 기반으로 결정
-  if checkAllDistribute == nil then
-        checkAllDistribute = not checkf  -- checkf가 true이면 득자 제외 모드
-  end
+    if checkAllDistribute == nil then
+        checkAllDistribute = not checkf
+    end
+
     local profit, avg, revenue, expense  = ADDONSELF.calcavg(filteredItems, n,
         function(item, c)
-            -- 아이템 목록은 나중에 구성 - 여기서는 grp만 채움
             if item.noBeneficiary ~= true then
-                -- DEBIT 아이템의 경우 빈 문자열을 그대로 사용
-                local l = item["beneficiary"] or ""
+                local l = GetLedgerDisplayBeneficiaryName(item)
+                l = ADDONSELF.NormalizeDisenchantHandoffBeneficiary(l)
                 if l == "" and item.type ~= "DEBIT" then
                     l = L["[Unknown]"]
                 end
@@ -306,8 +373,8 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
                         ["cost"] = 0,
                         ["items"] = {},
                         ["manualItems"] = {},
-                        ["manualCost"] = 0,
                         ["autoCost"] = 0,
+                        ["manualCost"] = 0,
                         ["citems"] = {},
                         ["compensation"] = 0,
                     }
@@ -315,51 +382,43 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
 
                 grp[l]["cost"] = grp[l]["cost"] + c
 
-                -- 아이템 정보 저장
-                if c > 0 then  -- 0골드 아이템은 제외
-                    -- DEBIT 아이템은 items 배열에 추가하지 않음 (수익 항목만 추가)
+                if c > 0 then
                     if item.type ~= "DEBIT" then
                         local hasItemLink = i and i ~= ""
                         if hasItemLink then
-                            -- 자동 캡처 (전리품)
                             local itemName = (not GetItemInfoFromHyperlink(i)) and d or i
                             table.insert(grp[l]["items"], itemName .. " " .. GetMoneyStringL(c))
                             grp[l]["autoCost"] = grp[l]["autoCost"] + c
                         else
-                            -- 수동 추가 (+수익 버튼)
                             local itemName = d or L["Other"]
                             table.insert(grp[l]["manualItems"], itemName .. " " .. GetMoneyStringL(c))
                             grp[l]["manualCost"] = grp[l]["manualCost"] + c
                         end
                     end
                 end
-
-                    end
+            end
         end,
         function(item, c)
-            -- ondebit callback
-            -- DEBIT 아이템의 경우 빈 문자열을 그대로 사용하고, 다른 경우에만 L["[Unknown]"] 사용
-            local l = item["beneficiary"] or ""
+            local l = GetLedgerDisplayBeneficiaryName(item)
+            l = ADDONSELF.NormalizeDisenchantHandoffBeneficiary(l)
             if l == "" and item.type ~= "DEBIT" then
                 l = L["[Unknown]"]
             end
             local d = item["detail"]["displayname"] or ""
             local ct = item["costtype"] or "GOLD"
 
-  
             if not grp[l] then
                 grp[l] = {
                     ["cost"] = 0,
                     ["items"] = {},
                     ["manualItems"] = {},
-                    ["manualCost"] = 0,
                     ["autoCost"] = 0,
+                    ["manualCost"] = 0,
                     ["citems"] = {},
                     ["compensation"] = 0,
                 }
             end
 
-            -- local s = string.format(L["Debit"] .. ": [%s] -> [%s] %s", d, l, GetMoneyStringL(c))
             local s = d .. " " .. GetMoneyStringL(c)
 
             if ct == "PROFIT_PERCENT" then
@@ -369,13 +428,13 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
             end
 
             grp[l]["compensation"] = grp[l]["compensation"] + c
-            table.insert( grp[l]["citems"], s)  -- DEBIT 아이템 추가
-          end,
+            table.insert(grp[l]["citems"], s)
+        end,
         checkAllDistribute
     )
 
-    local looter = {}        -- 자동 캡처 [수익]
-    local manualLooter = {}  -- 수동 추가 [+수익]
+    local looter = {}        -- 자동 캡처 [아이템]
+    local manualLooter = {}  -- 수동 [+수익]
     local compensation = {}
 
     for l, k in pairs(grp) do
@@ -407,67 +466,35 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
                 ["looter"] = looterName,
             })
         end
-    end
-
-    table.sort(looter, function(a, b) return a["cost"] > b["cost"] end)
-    table.sort(manualLooter, function(a, b) return a["cost"] > b["cost"] end)
-
-    -- compensation 배열 채우기 (지출 항목용)
-    for l, k in pairs(grp) do
-        local classFilename
-        for i = 1, MAX_RAID_MEMBERS do
-            local name, _, _, _, _, class = GetRaidRosterInfo(i)
-            if name == l then
-                classFilename = class
-                break
-            end
-        end
-
-        local looterName = l
-        if classFilename and RAID_CLASS_COLORS[classFilename] then
-            local color = RAID_CLASS_COLORS[classFilename].colorStr
-            looterName = "|c" .. color .. l .. "|r"
-        end
-
         if k["compensation"] > 0 then
             table.insert(compensation, {
                 ["beneficiary"] = looterName,
                 ["compensation"] = k["compensation"],
-                ["citems"] = k["citems"]
+                ["citems"] = k["citems"],
             })
         end
     end
 
-    table.sort(compensation, function(a, b)
-        return a["compensation"] > b["compensation"]
-    end)
+    table.sort(looter, function(a, b) return a["cost"] > b["cost"] end)
+    table.sort(manualLooter, function(a, b) return a["cost"] > b["cost"] end)
+    table.sort(compensation, function(a, b) return a["compensation"] > b["compensation"] end)
 
-      if #looter > 0 then
+    if #looter > 0 then
         local c = math.min(#looter, 40)
         local c_final = 0
-
-    
-        while c > 0 and looter[c]["cost"] == 0 do
-            c = c - 1
-        end
-
+        while c > 0 and looter[c]["cost"] == 0 do c = c - 1 end
         for i = 1, c do
             if looter[i] and looter[i]["looter"] ~= "" then
-                -- 텍스트 모드에서도 색상 유지 (사용자 요청)
-                local displayName = looter[i]["looter"]
-                    looternames = looternames .. displayName .. ", "
+                looternames = looternames .. looter[i]["looter"] .. ", "
                 c_final = c_final + 1
             end
         end
         looternames = looternames .. " (총 " .. c_final .. "명)"
-          else
-            end
+    end
 
-    -- 전체출력과 동일한 형식으로 수익/지출/득자 목록 구성
-    local lines = {}
     local outputText = ""
 
-    -- [수익] 자동 캡처 (요약/전체 동일)
+    -- [아이템] 자동 캡처
     if #looter > 0 then
         outputText = outputText .. "=========================" .. CRLF
         outputText = outputText .. "[아이템]" .. CRLF
@@ -476,7 +503,7 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
             if entry.cost > 0 then
                 count = count + 1
                 local name = entry.looter
-                outputText = outputText .. string.format("%d. %s [%s]" .. CRLF, count, name, GetMoneyStringL(entry.cost, true))
+                outputText = outputText .. string.format("%d. %s [%s]" .. CRLF, count, name, GetMoneyStringL(entry.cost))
                 for idx, item in ipairs(entry.items) do
                     outputText = outputText .. string.format("%d) %s %s" .. CRLF, idx, name, item)
                 end
@@ -484,29 +511,26 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
         end
     end
 
+    -- [무득 아이템]
     do
-        -- 무득 아이템 추가 출력 (수익 목록에 포함되지만 득자 계산에서 제외)
         local noBeneficiaryItems = {}
         for _, item in pairs(items or {}) do
             if item.type == "CREDIT" and item.noBeneficiary == true and item.cost and item.cost > 0 then
                 local i = item["detail"]["item"] or ""
-                local l = item["beneficiary"] or L["[Unknown]"]
-                local actualCost = item.costcache or (item.cost * 10000)
-
+                local rawB = GetLedgerDisplayBeneficiaryName(item)
+                local l = (not rawB or rawB == "") and L["[Unknown]"] or ADDONSELF.FormatBeneficiaryForDisplay(rawB)
+                local actualCost = item.costcache or item.cost
                 table.insert(noBeneficiaryItems, {
-                    itemLink = i,
-                    beneficiary = l,
-                    cost = actualCost
+                    itemLink = i, beneficiary = l, cost = actualCost,
                 })
             end
         end
-
         if #noBeneficiaryItems > 0 then
             outputText = outputText .. CRLF
             outputText = outputText .. "=========================" .. CRLF
             outputText = outputText .. "[무득 아이템]" .. CRLF
             for i, item in ipairs(noBeneficiaryItems) do
-                outputText = outputText .. string.format("%d. %s [%s] %s" .. CRLF, i, item.beneficiary, item.itemLink, GetMoneyStringL(item.cost, true))
+                outputText = outputText .. string.format("%d. %s [%s] %s" .. CRLF, i, item.beneficiary, item.itemLink, GetMoneyStringL(item.cost))
             end
             outputText = outputText .. CRLF
         end
@@ -514,7 +538,7 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
 
     -- [+수익] 수동 추가
     if #manualLooter > 0 then
-        outputText = outputText .. CRLF                                       -- 헤더 위 빈 줄
+        outputText = outputText .. CRLF
         outputText = outputText .. "=========================" .. CRLF
         outputText = outputText .. "[+" .. L["Credit"] .. "]" .. CRLF
         local count = 0
@@ -522,87 +546,61 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
             if entry.cost > 0 then
                 count = count + 1
                 local name = entry.looter
-                outputText = outputText .. string.format("%d. %s [%s]" .. CRLF, count, name, GetMoneyStringL(entry.cost, true))
+                outputText = outputText .. string.format("%d. %s [%s]" .. CRLF, count, name, GetMoneyStringL(entry.cost))
                 for idx, item in ipairs(entry.items) do
                     outputText = outputText .. string.format("%d) %s %s" .. CRLF, idx, name, item)
                 end
             end
         end
-        outputText = outputText .. CRLF                                       -- 섹션 끝 빈 줄
+        outputText = outputText .. CRLF
     end
 
-    -- 지출 목록 출력
+    -- [+지출]
     if expense > 0 and #compensation > 0 then
         outputText = outputText .. CRLF
         outputText = outputText .. "=========================" .. CRLF
         outputText = outputText .. "[+" .. L["Debit"] .. "]" .. CRLF
-
         for i, l in ipairs(compensation) do
             local beneficiaryName = l.beneficiary or L["[Unknown]"]
-            outputText = outputText .. string.format("%d. %s [%s]" .. CRLF, i, beneficiaryName, GetMoneyStringL(l.compensation, true))
-
+            outputText = outputText .. string.format("%d. %s [%s]" .. CRLF, i, beneficiaryName, GetMoneyStringL(l.compensation))
             for idx, item in ipairs(l.citems) do
                 outputText = outputText .. string.format("%d) %s %s" .. CRLF, idx, beneficiaryName, item)
             end
         end
     end
 
-    ------------------------------------
-    -- 분배는 항상 골드 단위 floor (사용자 손해 방지: 1000골드/3명 = 333골, 잔여는 운영자 보유)
-    local floorNum = math.floor(avg/10000)*10000
-
-    local partyMoney  = floorNum*5
-    local partyMoney4 = floorNum*4
-    local partyMoney3 = floorNum*3
-    local partyMoney2 = floorNum*2
-
-    revenue     = GetMoneyStringL(revenue,     true)
-    expense     = GetMoneyStringL(expense,     true)
-    profit      = GetMoneyStringL(profit,      true)
-    floorNum    = GetMoneyStringL(floorNum,    true)
-    partyMoney  = GetMoneyStringL(partyMoney,  true)
-    partyMoney4 = GetMoneyStringL(partyMoney4, true)
-    partyMoney3 = GetMoneyStringL(partyMoney3, true)
-    partyMoney2 = GetMoneyStringL(partyMoney2, true)
-
-    -- 수익/지출 정보와 득자 목록 합치기
-    s = outputText .. CRLF
-    -- raw 값 (calcavg 결과 기반: revenue/profit 가 단일 진실)
-    -- 단 여기 시점에서 revenue/expense/profit 는 이미 GetMoneyStringL 처리된 string. raw 재계산.
-    local revenueRaw, expenseRaw, profitRaw = 0, 0, 0
-    for _, item in pairs(items or {}) do
-        if item.cost and item.cost > 0 and (item.costtype == nil or item.costtype == "GOLD") then
-            local c = item.cost * 10000
-            if item.type == "CREDIT" then revenueRaw = revenueRaw + c
-            elseif item.type == "DEBIT" then expenseRaw = expenseRaw + c end
-        end
-    end
-    profitRaw = math.max(revenueRaw - expenseRaw, 0)
-    local manualRevenueRaw = 0
+    -- 자동/수동 수익 분리
+    local manualRevenue = 0
     for _, item in pairs(items or {}) do
         if item.type == "CREDIT" and item.cost and item.cost > 0
                 and (item.costtype == nil or item.costtype == "GOLD")
                 and not (item.detail and item.detail.item) then
-            manualRevenueRaw = manualRevenueRaw + item.cost * 10000
+            manualRevenue = manualRevenue + item.cost
         end
     end
-    local autoRevenueRaw  = revenueRaw - manualRevenueRaw
-    local distributionRaw = profitRaw
+    local autoRevenue = (revenue or 0) - manualRevenue
+    local distribution = profit or 0
 
+    local floorNum = math.floor(avg)
+    local partyMoney  = floorNum * 5
+    local partyMoney4 = floorNum * 4
+    local partyMoney3 = floorNum * 3
+    local partyMoney2 = floorNum * 2
+
+    local s = outputText .. CRLF
     s = s .. "=========================" .. CRLF
-    s = s .. "아이템 : "    .. GetMoneyStringL(autoRevenueRaw,   true) .. CRLF
-    s = s .. "총수익 : +"  .. GetMoneyStringL(manualRevenueRaw, true) .. CRLF
-    s = s .. "총지출 : -"  .. expense                                  .. CRLF
-    s = s .. "총분배금 : " .. GetMoneyStringL(distributionRaw,  true) .. CRLF
+    s = s .. "아이템 : "    .. GetMoneyStringL(autoRevenue)     .. CRLF
+    s = s .. "총수익 : +"   .. GetMoneyStringL(manualRevenue)   .. CRLF
+    s = s .. "총지출 : -"   .. GetMoneyStringL(expense)         .. CRLF
+    s = s .. "총분배금 : "  .. GetMoneyStringL(distribution)    .. CRLF
     s = s .. looternames .. CRLF
-    s = s .. "분배 인원 설정 : " .. splitCount .. CRLF
-    s = s .. "개인당 : " .. floorNum  .. CRLF
-    s = s .. "파티당 : " .. partyMoney  .. CRLF
-    s = s .. "4명당 : " .. partyMoney4 .. CRLF
-    s = s .. "3명당 : " .. partyMoney3 .. CRLF
-    s = s .. "2명당 : " .. partyMoney2 .. CRLF
+    s = s .. "분배 인원 설정 : " .. splitCount                  .. CRLF
+    s = s .. "개인당 : " .. GetMoneyStringL(floorNum)           .. CRLF
+    s = s .. "파티당 : " .. GetMoneyStringL(partyMoney)         .. CRLF
+    s = s .. "4명당 : "  .. GetMoneyStringL(partyMoney4)        .. CRLF
+    s = s .. "3명당 : "  .. GetMoneyStringL(partyMoney3)        .. CRLF
+    s = s .. "2명당 : "  .. GetMoneyStringL(partyMoney2)        .. CRLF
 
-    -- 원래 checkAllDistribute 값 복원
     if originalCheckAllDistribute ~= nil and ADDONSELF and ADDONSELF.db and ADDONSELF.db.SetConfig then
         ADDONSELF.db:SetConfig("checkAllDistribute", originalCheckAllDistribute)
     end
@@ -610,118 +608,71 @@ ADDONSELF.genexport = function(items, n, checkf, checkAllDistribute)
     return s
 end
 
+-- IRA_UI 양식 채팅 출력 (자동 [아이템] / [무득 아이템] / [+수익] / [+지출] / 정산 — genexport와 동일 포맷)
 ADDONSELF.genreport = function(items, n, channel, checkf)
 
-    -- 파티나 공격대 상태 확인
-    if channel == "RAID" and not IsInRaid() and not IsInGroup() then
-        ADDONSELF.print("공격대 또는 파티 상태에서만 출력 가능합니다.")
+    if channel == "RAID" and not IsInRaid() then
+        ADDONSELF.print("공격대 상태에서만 출력 가능합니다.")
         return
     end
 
-    -- NOTE: noBeneficiary 필터링을 제거하고 원본 items 사용
-    -- 수익 계산에는 모든 CREDIT 아이템이 포함되어야 함
-    -- noBeneficiary는 분산 계산(divisor)에만 영향을 줌
     local filteredItems = items
 
     -- UI에서 DEBIT 아이템의 최신 beneficiary 정보 가져와서 items 배열 업데이트
     local GUI = ADDONSELF.gui
     if GUI and GUI.lootLogFrame then
-        -- ScrollingTable에서 현재 데이터 가져오기
         local uiData = GUI.lootLogFrame.data
-
         for idx, entry in ipairs(uiData or {}) do
-        
-            if entry.cols then
-                            end
-
-            -- 여러 방법으로 DEBIT 아이템 식별 시도
             local isDebitItem = false
-
-            -- 방법 1: entry.type 필드 확인
-            if entry.type == "DEBIT" then
-                isDebitItem = true
-            end
-
-            -- 방법 2: realItemIdx로 필터링된Items 확인
+            if entry.type == "DEBIT" then isDebitItem = true end
             if entry.realItemIdx and filteredItems[entry.realItemIdx] and filteredItems[entry.realItemIdx].type == "DEBIT" then
                 isDebitItem = true
             end
-
-            -- 방법 3: 첫 번째 열에 "보상:" 포함 확인
-            if entry.cols and entry.cols[1] and entry.cols[1].value and type(entry.cols[1].value) == "string" and string.find(entry.cols[1].value, "보상:") then
+            if entry.cols and entry.cols[3] and entry.cols[3].value and type(entry.cols[3].value) == "string" and string.find(entry.cols[3].value, "보상:") then
                 isDebitItem = true
             end
-
             if isDebitItem and entry.cols and entry.cols[4] then
-                -- 데이터베이스 아이템 찾기
                 local dbItem = nil
-
-                -- 방법 1: realItemIdx 사용
                 if entry.realItemIdx and filteredItems[entry.realItemIdx] then
                     dbItem = filteredItems[entry.realItemIdx]
                 end
-
-                -- 방법 2: displayname으로 찾기
-                if not dbItem and entry.cols[1] and entry.cols[1].value then
+                if not dbItem and entry.cols[3] and entry.cols[3].value then
                     for _, item in ipairs(filteredItems) do
-                        if item.type == "DEBIT" and item.detail and item.detail.displayname == entry.cols[1].value then
+                        if item.type == "DEBIT" and item.detail and item.detail.displayname == entry.cols[3].value then
                             dbItem = item
                             break
                         end
                     end
                 end
-
-                -- ScrollingTable에서 entry.beneficiary 직접 읽기 (데이터 동기화 후)
                 local currentUIValue = entry.beneficiary or entry.cols[4].value or ""
-
-                -- 빈 문자열이면 L["[Unknown]"]으로 변환하지 않고 그대로 사용
-                if currentUIValue == "" then
-                    currentUIValue = ""
-                end
-
-                
                 if dbItem then
-                    local oldBeneficiary = dbItem.beneficiary
                     dbItem.beneficiary = currentUIValue
-                                    else
-                                    end
+                end
             end
         end
-    else
-            end
+    end
 
     local lines = {}
     local grp = {}
 
-    
-    -- UI의 체크박스 상태를 읽어서 분배 방식 결정
-    local checkAllDistribute = true  -- 기본값: 모두 분배
+    local checkAllDistribute = true
     local checkbox = _G.IberisRaidAuctionCheckAllDistributeButton
     if checkbox then
         local rawValue = checkbox:GetChecked()
         checkAllDistribute = (rawValue == true) or (rawValue == 1)
     end
 
-    
-    -- oncredit callback 함수 정의
     local oncreditCallback = function(item, c)
-        -- oncredit callback
-                if c == 0 then
-                        return
-        end  -- 골드 0인 아이템은 무시
-
-        -- 무득 아이템은 득자 그룹에 추가하지 않음 (득자 계산에서 제외)
-        -- nil인 경우도 false로 처리 (기존 데이터 호환)
-                if item.noBeneficiary ~= true then
-            -- DEBIT 아이템은 여기 오지 않지만, 일관성을 위해 동일한 로직 적용
-            local l = item["beneficiary"] or ""
+        if c == 0 then return end
+        if item.noBeneficiary ~= true then
+            local l = GetLedgerDisplayBeneficiaryName(item)
+            l = ADDONSELF.NormalizeDisenchantHandoffBeneficiary(l)
             if l == "" and item.type ~= "DEBIT" then
                 l = L["[Unknown]"]
             end
             local i = item["detail"]["item"] or ""
             local d = item["detail"]["displayname"] or ""
 
-
             if not grp[l] then
                 grp[l] = {
                     ["cost"] = 0,
@@ -733,39 +684,33 @@ ADDONSELF.genreport = function(items, n, channel, checkf)
                     ["compensation"] = 0,
                 }
             end
-
             grp[l]["cost"] = grp[l]["cost"] + c
 
-            if not GetItemInfoFromHyperlink(i) then
-                i = d
-            end
-            -- CREDIT: 자동 캡처(detail.item 있음) vs 수동 추가(+수익 버튼, displayname만)
             if item.type == "CREDIT" then
-                if item["detail"]["item"] then
+                local hasItemLink = i and i ~= ""
+                if hasItemLink then
+                    local itemName = (not GetItemInfoFromHyperlink(i)) and d or i
                     grp[l]["autoCost"] = grp[l]["autoCost"] + c
-                    table.insert(grp[l]["items"], i .. " " .. GetMoneyStringL(c))
+                    table.insert(grp[l]["items"], itemName .. " " .. GetMoneyStringL(c))
                 else
                     grp[l]["manualCost"] = grp[l]["manualCost"] + c
-                    table.insert(grp[l]["manualItems"], d .. " " .. GetMoneyStringL(c))
+                    table.insert(grp[l]["manualItems"], (d or L["Other"]) .. " " .. GetMoneyStringL(c))
                 end
             end
         end
     end
 
-    local profit, avg, revenue, expense  = ADDONSELF.calcavg(filteredItems, n,
+    local profit, avg, revenue, expense = ADDONSELF.calcavg(filteredItems, n,
         oncreditCallback,
         function(item, c)
-            -- ondebit callback
-                        -- DEBIT 아이템의 경우 빈 문자열을 그대로 사용하고, 다른 경우에만 L["[Unknown]"] 사용
-            local l = item["beneficiary"] or ""
+            local l = GetLedgerDisplayBeneficiaryName(item)
+            l = ADDONSELF.NormalizeDisenchantHandoffBeneficiary(l)
             if l == "" and item.type ~= "DEBIT" then
                 l = L["[Unknown]"]
             end
             local d = item["detail"]["displayname"] or ""
             local ct = item["costtype"] or "GOLD"
 
-
-
             if not grp[l] then
                 grp[l] = {
                     ["cost"] = 0,
@@ -778,90 +723,70 @@ ADDONSELF.genreport = function(items, n, channel, checkf)
                 }
             end
 
-            -- local s = string.format(L["Debit"] .. ": [%s] -> [%s] %s", d, l, GetMoneyStringL(c))
             local s = d .. " " .. GetMoneyStringL(c)
-
             if ct == "PROFIT_PERCENT" then
                 s = s .. " (" .. (item["cost"] or 0) .. " % " .. L["Net Profit"] .. ")"
             elseif ct == "MUL_AVG" then
                 s = s .. " (" .. (item["cost"] or 0) .. " * " .. L["Per Member credit"] .. ")"
             end
-
             grp[l]["compensation"] = grp[l]["compensation"] + c
-            table.insert( grp[l]["citems"], s)  -- DEBIT 아이템 추가
-                    end,
+            table.insert(grp[l]["citems"], s)
+        end,
         checkAllDistribute
     )
 
-
-    local looter = {}        -- 자동 캡처 [수익]
-    local manualLooter = {}  -- 수동 추가 [+수익]
+    local looter = {}        -- 자동 캡처 [아이템]
+    local manualLooter = {}  -- 수동 [+수익]
     local compensation = {}
 
-for l, k in pairs(grp) do
-    -- 클래스 정보와 색상 처리는 한 번만 수행
-    local classFilename
-    local name = Ambiguate(l, "short")  -- 서버명 제거
-
-    for i = 1, MAX_RAID_MEMBERS do
-        local raidName = GetRaidRosterInfo(i)
-        if raidName and Ambiguate(raidName, "short") == name then
-            local guid = UnitGUID("raid"..i)
-            if guid then
-                local _, _, _, _, _, class = GetPlayerInfoByGUID(guid)
-                classFilename = class
+    for l, k in pairs(grp) do
+        local classFilename
+        local nameShort = Ambiguate(l, "short")
+        for i = 1, MAX_RAID_MEMBERS do
+            local raidName = GetRaidRosterInfo(i)
+            if raidName and Ambiguate(raidName, "short") == nameShort then
+                local guid = UnitGUID("raid"..i)
+                if guid then
+                    local _, _, _, _, _, class = GetPlayerInfoByGUID(guid)
+                    classFilename = class
+                end
+                break
             end
-            break
+        end
+        local looterName = l
+        if classFilename and RAID_CLASS_COLORS[classFilename] then
+            local color = RAID_CLASS_COLORS[classFilename].colorStr
+            looterName = "|c" .. color .. l .. "|r"
+        end
+
+        if k["items"] and #k["items"] > 0 then
+            table.insert(looter, {
+                ["cost"] = k["autoCost"] or 0,
+                ["items"] = k["items"],
+                ["looter"] = looterName,
+            })
+        end
+        if k["manualItems"] and #k["manualItems"] > 0 then
+            table.insert(manualLooter, {
+                ["cost"] = k["manualCost"] or 0,
+                ["items"] = k["manualItems"],
+                ["looter"] = looterName,
+            })
+        end
+        if k["compensation"] > 0 then
+            table.insert(compensation, {
+                ["beneficiary"] = looterName,
+                ["compensation"] = k["compensation"],
+                ["citems"] = k["citems"],
+            })
         end
     end
 
-    local looterName = l
-    if classFilename and RAID_CLASS_COLORS[classFilename] then
-        local color = RAID_CLASS_COLORS[classFilename].colorStr
-        looterName = "|c" .. color .. l .. "|r"
-    end
+    table.sort(looter,        function(a, b) return a["cost"] > b["cost"] end)
+    table.sort(manualLooter,  function(a, b) return a["cost"] > b["cost"] end)
+    table.sort(compensation,  function(a, b) return a["compensation"] > b["compensation"] end)
 
-    -- 자동 캡처 [수익]
-    if k["items"] and #k["items"] > 0 then
-        table.insert(looter, {
-            ["cost"] = k["autoCost"] or 0,
-            ["items"] = k["items"],
-            ["looter"] = looterName,
-        })
-    end
-
-    -- 수동 추가 [+수익]
-    if k["manualItems"] and #k["manualItems"] > 0 then
-        table.insert(manualLooter, {
-            ["cost"] = k["manualCost"] or 0,
-            ["items"] = k["manualItems"],
-            ["looter"] = looterName,
-        })
-    end
-
-    -- compensation 배열 채우기 (지출 항목용)
-    if k["compensation"] > 0 then
-                table.insert(compensation, {
-            ["beneficiary"] = looterName,
-            ["compensation"] = k["compensation"],
-            ["citems"] = k["citems"]
-        })
-    end
-end
-
-    table.sort( looter, function(a, b)
-        return a["cost"] > b["cost"]
-    end)
-
-    table.sort( manualLooter, function(a, b)
-        return a["cost"] > b["cost"]
-    end)
-
-    table.sort( compensation, function(a, b)
-        return a["compensation"] > b["compensation"]
-    end)
-
-    -- 득자 이름 목록 (요약 / 전체 모두에서 정산 헤더로 사용)
+    -- 득자 이름 목록 (자동 캡처 받은 사람만)
     local beneficiaryNames = {}
     local seenNames = {}
     local function pushBeneficiary(entry)
@@ -878,13 +803,11 @@ end
             table.insert(beneficiaryNames, cleanName)
         end
     end
-
-    -- 득자 이름 수집 — 자동 캡처 받은 사람만 (수동 +수익 기부자 제외)
     for _, entry in ipairs(looter) do if entry.cost > 0 then pushBeneficiary(entry) end end
 
-    -- 요약 모드: entries 다 숨기고 정산만 표시
+    -- 요약 모드: 엔트리들 다 숨기고 정산만 표시
     if not checkf then
-        -- [수익] 자동 캡처
+        -- [아이템] 자동 캡처
         if #looter > 0 then
             table.insert(lines, "=========================")
             table.insert(lines, "[아이템]")
@@ -893,44 +816,35 @@ end
                 if entry.cost > 0 then
                     count = count + 1
                     local name = entry.looter
-                    table.insert(lines, string.format("%d. %s [%s]", count, name, GetMoneyStringL(entry.cost, true)))
+                    table.insert(lines, string.format("%d. %s [%s]", count, name, GetMoneyStringL(entry.cost)))
                     for idx, item in ipairs(entry.items) do
                         table.insert(lines, string.format("%d) %s %s", idx, name, item))
                     end
                 end
             end
         end
-
     end
 
-    -- 무득 아이템 추가 출력 (수익 목록에 포함되지만 득자 계산에서 제외)
+    -- 무득 아이템
     local noBeneficiaryItems = {}
     for _, item in pairs(items or {}) do
         if item.type == "CREDIT" and item.noBeneficiary == true and item.cost and item.cost > 0 then
             local i = item["detail"]["item"] or ""
             local d = item["detail"]["displayname"] or ""
-            local l = item["beneficiary"] or L["[Unknown]"]
-
-            -- calcavg에서 계산된 실제 코스트 사용
-            local actualCost = item.costcache or (item.cost * 10000)
-
+            local rawB = GetLedgerDisplayBeneficiaryName(item)
+            local l = (not rawB or rawB == "") and L["[Unknown]"] or ADDONSELF.FormatBeneficiaryForDisplay(rawB)
+            local actualCost = item.costcache or item.cost
             table.insert(noBeneficiaryItems, {
-                itemLink = i,  -- 원본 아이템 링크 보관
-                displayName = d,
-                beneficiary = l,
-                cost = actualCost  -- calcavg에서 계산된 실제 코스트
+                itemLink = i, displayName = d, beneficiary = l, cost = actualCost,
             })
         end
     end
 
-    -- 무득/+수익/지출 entries 도 요약 모드에서는 숨김
     if not checkf then
-        -- 무득 아이템이 있으면 별도로 출력 (원래 형식처럼 링크 포함)
         if #noBeneficiaryItems > 0 then
             table.insert(lines, "=========================")
             table.insert(lines, "[무득 아이템]")
             for i, item in ipairs(noBeneficiaryItems) do
-                -- 득자이름 [아이템링크] 금액 형식으로 출력
                 table.insert(lines, string.format("%d. %s [%s] %s", i, item.beneficiary, item.itemLink, GetMoneyStringL(item.cost)))
             end
         end
@@ -944,7 +858,7 @@ end
                 if entry.cost > 0 then
                     count = count + 1
                     local name = entry.looter
-                    table.insert(lines, string.format("%d. %s [%s]", count, name, GetMoneyStringL(entry.cost, true)))
+                    table.insert(lines, string.format("%d. %s [%s]", count, name, GetMoneyStringL(entry.cost)))
                     for idx, item in ipairs(entry.items) do
                         table.insert(lines, string.format("%d) %s %s", idx, name, item))
                     end
@@ -952,14 +866,14 @@ end
             end
         end
 
-        if expense > 0 then
+        if expense > 0 and #compensation > 0 then
             table.insert(lines, "=========================")
             table.insert(lines, "[+" .. L["Debit"] .. "]")
             local c = math.min(#compensation, 80)
             for i = 1, c do
                 local l = compensation[i]
                 local beneficiaryName = l["beneficiary"] or L["[Unknown]"]
-                table.insert(lines, i .. ". " .. beneficiaryName .. " [" .. GetMoneyStringL(l["compensation"], true) .. "]")
+                table.insert(lines, i .. ". " .. beneficiaryName .. " [" .. GetMoneyStringL(l["compensation"]) .. "]")
                 for idx, item in ipairs(l["citems"]) do
                     table.insert(lines, string.format("%d) %s %s", idx, beneficiaryName, item))
                 end
@@ -967,23 +881,34 @@ end
         end
     end
 
-    -- 분배는 항상 골드 단위 floor (사용자 손해 방지)
-    local floorNum = math.floor(avg/10000)*10000
+    -- 자동/수동 수익 분리
+    local manualRevenue = 0
+    for _, item in pairs(items or {}) do
+        if item.type == "CREDIT" and item.cost and item.cost > 0
+                and (item.costtype == nil or item.costtype == "GOLD")
+                and not (item.detail and item.detail.item) then
+            manualRevenue = manualRevenue + item.cost
+        end
+    end
+    local autoRevenue  = (revenue or 0) - manualRevenue
+    local distribution = profit or 0
 
-    local partyMoney  = floorNum*5
-    local partyMoney4 = floorNum*4
-    local partyMoney3 = floorNum*3
-    local partyMoney2 = floorNum*2
+    local floorNum    = math.floor(avg or 0)
+    local partyMoney  = floorNum * 5
+    local partyMoney4 = floorNum * 4
+    local partyMoney3 = floorNum * 3
+    local partyMoney2 = floorNum * 2
 
-    -- splitCount 결정 (위에서 미리)
+    -- 분배 인원
     local splitCount
     if checkAllDistribute then
         splitCount = n
     else
         local beneficiaries = {}
         for _, item in pairs(items or {}) do
-            if item.noBeneficiary ~= true and item.type == "CREDIT" and item.beneficiary and item.beneficiary ~= "" and item.cost and item.cost > 0 then
-                beneficiaries[item.beneficiary] = true
+            local winner = GetLedgerWinnerForCount(item)
+            if item.noBeneficiary ~= true and item.type == "CREDIT" and winner ~= "" and item.cost and item.cost > 0 then
+                beneficiaries[winner] = true
             end
         end
         local actualBeneficiaryCount = 0
@@ -993,143 +918,46 @@ end
         splitCount = math.max(n - actualBeneficiaryCount, 1)
     end
 
-    -- raw 값 (calcavg 결과 기반: revenue/profit 가 단일 진실)
-    local manualRevenueRaw = 0
-    for _, item in pairs(items or {}) do
-        if item.type == "CREDIT" and item.cost and item.cost > 0
-                and (item.costtype == nil or item.costtype == "GOLD")
-                and not (item.detail and item.detail.item) then
-            manualRevenueRaw = manualRevenueRaw + item.cost * 10000
-        end
-    end
-    local autoRevenueRaw  = revenue - manualRevenueRaw
-    local distributionRaw = profit
-
-    local autoRevenueStr   = GetMoneyStringL(autoRevenueRaw,   true)
-    local manualRevenueStr = GetMoneyStringL(manualRevenueRaw, true)
-    local distributionStr  = GetMoneyStringL(distributionRaw,  true)
-
-    revenue     = GetMoneyStringL(revenue,     true)
-    expense     = GetMoneyStringL(expense,     true)
-    profit      = GetMoneyStringL(profit,      true)
-    floorNum    = GetMoneyStringL(floorNum,    true)
-    partyMoney  = GetMoneyStringL(partyMoney,  true)
-    partyMoney4 = GetMoneyStringL(partyMoney4, true)
-    partyMoney3 = GetMoneyStringL(partyMoney3, true)
-    partyMoney2 = GetMoneyStringL(partyMoney2, true)
-
-    local myStatus = -1
-    if IsInRaid() then    
-        local pName = UnitName("player")
-        for i = 1, MAX_RAID_MEMBERS do
-            local name, rank = GetRaidRosterInfo(i)
-            if name == pName then
-    	     myStatus = rank
-	     break
-            end
-        end
-    end
-
-    -- 간단한 득자 목록 생성
-    local beneficiaryList = {}
-
-    for i, item in ipairs(filteredItems) do
-        -- CREDIT 아이템이고 비용이 0보다 커야 함 (filteredItems는 이미 noBeneficiary 필터링됨)
-        if item["type"] == "CREDIT" and item["cost"] and item["cost"] > 0 then
-            local name = item["beneficiary"] or L["[Unknown]"]
-            local shortName = Ambiguate(name, "short")
-
-            -- 클래스 색상 정보 가져오기
-            local classFilename
-            for i = 1, MAX_RAID_MEMBERS do
-                local raidName = GetRaidRosterInfo(i)
-                if raidName and Ambiguate(raidName, "short") == shortName then
-                    local guid = UnitGUID("raid"..i)
-                    if guid then
-                        local _, _, _, _, _, class = GetPlayerInfoByGUID(guid)
-                        classFilename = class
-                    end
-                    break
-                end
-            end
-
-            local displayName = name
-            if classFilename and RAID_CLASS_COLORS[classFilename] then
-                local color = RAID_CLASS_COLORS[classFilename].colorStr
-                displayName = "|c" .. color .. name .. "|r"
-            end
-
-            table.insert(beneficiaryList, {
-                name = displayName,
-                cost = item["cost"]
-            })
-        end
-    end
-
-    -- 비용 기준 정렬 및 중복 제거
-    local seenNames = {}
-    local uniqueBeneficiaries = {}
-    for _, beneficiary in ipairs(beneficiaryList) do
-        if not seenNames[beneficiary.name] and beneficiary.cost > 0 then
-            table.insert(uniqueBeneficiaries, beneficiary)
-            seenNames[beneficiary.name] = true
-        end
-    end
-
-    table.sort(uniqueBeneficiaries, function(a, b)
-        return a.cost > b.cost
-    end)
-
-  
-    -- splitCount 는 위에서 미리 결정됨
-
-    -- 정산 라인 (genexport 와 동일 형식)
+    -- 정산 (genexport와 동일 포맷)
     table.insert(lines, "=========================")
-    table.insert(lines, "아이템 : " .. autoRevenueStr)
-    table.insert(lines, "총수익 : +" .. manualRevenueStr)
-    table.insert(lines, "총지출 : -" .. expense)
-    table.insert(lines, "총분배금 : " .. distributionStr)
-    -- 득자 한 줄 (genexport 와 동일 형식)
+    table.insert(lines, "아이템 : "    .. GetMoneyStringL(autoRevenue))
+    table.insert(lines, "총수익 : +"   .. GetMoneyStringL(manualRevenue))
+    table.insert(lines, "총지출 : -"   .. GetMoneyStringL(expense))
+    table.insert(lines, "총분배금 : "  .. GetMoneyStringL(distribution))
     if not checkf and #beneficiaryNames > 0 then
         table.insert(lines, "득자 : " .. table.concat(beneficiaryNames, ", ") .. ",  (총 " .. #beneficiaryNames .. "명)")
     end
     table.insert(lines, "분배 인원 설정 : " .. splitCount)
-    table.insert(lines, "개인당 : " .. floorNum)
-    table.insert(lines, "파티당 : " .. partyMoney)
-    table.insert(lines, "4명당 : " .. partyMoney4)
-    table.insert(lines, "3명당 : " .. partyMoney3)
-    table.insert(lines, "2명당 : " .. partyMoney2)
+    table.insert(lines, "개인당 : " .. GetMoneyStringL(floorNum))
+    table.insert(lines, "파티당 : " .. GetMoneyStringL(partyMoney))
+    table.insert(lines, "4명당 : "  .. GetMoneyStringL(partyMoney4))
+    table.insert(lines, "3명당 : "  .. GetMoneyStringL(partyMoney3))
+    table.insert(lines, "2명당 : "  .. GetMoneyStringL(partyMoney2))
 
-    -- PRINT 채널: 본인 채팅창에만 (테스트/거래기록 확인용)
+    local localText = table.concat(lines, CRLF)
+    if channel == "LOCAL" then
+        return localText
+    end
+
     local SendToChat
     if channel == "PRINT" then
         SendToChat = function(msg) print(msg) end
     else
         SendToChat = function(msg)
-            if not IsInRaid() then
-                if IsInGroup() then
-                    SendChatMessage(msg, "PARTY")
-                else
-                    SendChatMessage(msg, "SAY")
-                end
-            else
+            if IsInRaid() then
                 SendChatMessage(msg, "RAID")
+            else
+                ADDONSELF.print(msg)
             end
         end
     end
 
-    -- borrow from [details]
-    -- 모든 메시지를 타이머로 순차 전송
+    -- borrow from [details] — 모든 메시지를 타이머로 순차 전송
     for i = 1, #lines do
         local message = lines[i]
-        local timer = C_Timer.NewTimer(i * 200 / 1000, function()
+        C_Timer.NewTimer(i * 200 / 1000, function()
             SendToChat(message)
         end)
     end
-
-    -- if myStatus > 0 then    
-    --     SendChatMessage(L["Per Member credit"] .. ": " .. floorNum, "RAID_WARNING")
-    --     SendChatMessage(L["Per Party credit"] .. ": " .. partyMoney, "RAID_WARNING")
-    -- end
-
 end
+
