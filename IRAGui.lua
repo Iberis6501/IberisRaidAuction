@@ -2326,9 +2326,11 @@ function GUI:Init()
             self:SetBackdropColor(0.22, 0.22, 0.28, 0.95)
             self:SetBackdropBorderColor(0.8, 0.5, 1.0, 1.0)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText("테스트 아이템 25개 추가")
-            GameTooltip:AddLine("카라잔(TBC 2.0/2.1) 실제 드랍 도안 4개, 보스 에픽 17종, 마력추출 인계 2건, 마력추출 결과물 2줄을 추가합니다.", 0.7, 0.7, 0.7)
-            GameTooltip:AddLine("비공대·수신자 없음: |cFF00CCFF/ira synctest on|r 후 누르면 네트워크 없이 수신 경로만 재생합니다.", 0.55, 0.75, 0.95, true)
+            local td = ADDONSELF.testData
+            local count = (td and td.count) or 0
+            local label = (td and td.label) or "테스트 데이터"
+            GameTooltip:SetText(string.format("테스트 아이템 %d건 추가", count))
+            GameTooltip:AddLine(label .. "를 장부에 추가합니다.", 0.7, 0.7, 0.7, true)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function(self)
@@ -2345,114 +2347,38 @@ function GUI:Init()
 
         b:SetScript("OnClick", function()
             local ok, err = xpcall(function()
-                -- 카라잔(TBC) 실제 드랍/잡템 도안 4개 + 보스/잡템 Epic 17종 + 마력추출 인계 테스트 2종 + 마력추출 결과물 2줄.
-                -- 자동기록 품질 룰(iraNonForcePickupQualityAllows)에 맞춰 모두 통과 가능한 등급만 포함:
-                --   • 도안·레시피: AtlasLootClassic 카라잔 표 기준 실제 드랍/잡템 도안 4종
-                --   • 그 외: 카라잔 보스/잡템 Epic 17종
-                --   • 추가로 2개는 "*마력추출*" 0골 인계 기록으로 넣어 뽀각 테스트를 바로 할 수 있게 한다.
-                --   • 추가로 2개는 실제 마력추출 결과물 행으로 넣어 뽀각 개수/스택 테스트에 사용한다.
-                -- 모든 ID/이름은 AtlasLootClassic 카라잔 테이블 기준으로 검증한다.
-                local testItems = {
-                    -- 카라잔 실제 드랍/잡템 도안
-                    { id = 23809, name = "Schematic: Stabilized Eternium Scope", cost = 8000, isRecipe = true }, -- 기계공학
-                    { id = 22559, name = "Formula: Enchant Weapon - Mongoose",   cost = 8000, isRecipe = true }, -- 마법부여
-                    { id = 21903, name = "Pattern: Soulcloth Shoulders",        cost = 8000, isRecipe = true }, -- 카라잔 잡템
-                    { id = 21904, name = "Pattern: Soulcloth Vest",             cost = 8000, isRecipe = true }, -- 카라잔 잡템
-                    -- 카라잔 보스/잡템 Epic
-                    { id = 28509, name = "Worgen Claw Necklace",                cost = 15000 },  -- Attumen 목걸이
-                    { id = 28570, name = "Shadow-Cloak of Dalaran",             cost = 26000 },  -- Moroes 망토
-                    { id = 28528, name = "Moroes' Lucky Pocket Watch",          cost = 30000 },  -- Moroes 트링켓
-                    { id = 28524, name = "Emerald Ripper",                      cost = 28000 },  -- Moroes 단검
-                    { id = 28572, name = "Blade of the Unrequited",             cost = 25000 },  -- Opera 단검
-                    { id = 28573, name = "Despair",                             cost = 24000 },  -- Opera 양손검
-                    { id = 28633, name = "Staff of Infinite Mysteries",         cost = 65000 },  -- Curator 지팡이
-                    { id = 28653, name = "Shadowvine Cloak of Infusion",        cost = 31000 },  -- Illhoof 망토
-                    { id = 28785, name = "The Lightning Capacitor",             cost = 54000 },  -- Illhoof 장신구
-                    { id = 28674, name = "Saberclaw Talisman",                  cost = 18000 },  -- Shade of Aran 목걸이
-                    { id = 28734, name = "Jewel of Infinite Possibilities",     cost = 42000 },  -- Netherspite 보조장비
-                    { id = 28762, name = "Adornment of Stolen Souls",           cost = 20000 },  -- Prince 목걸이
-                    { id = 28770, name = "Nathrezim Mindblade",                 cost = 32000 },  -- Prince 단검
-                    { id = 28771, name = "Light's Justice",                     cost = 75000 },  -- Prince 한손 둔기
-                    { id = 28602, name = "Robe of the Elder Scribes",           cost = 42000 },  -- Nightbane 천가슴
-                    { id = 28603, name = "Talisman of Nightbane",               cost = 36000 },  -- Nightbane 보조장비
-                    { id = 28604, name = "Nightstaff of the Everliving",        cost = 26000 },  -- Nightbane 지팡이
-                    { id = 28601, name = "Chestguard of the Conniver",          cost = 0, isDisenchantHandoff = true }, -- 마력추출 인계 테스트
-                    { id = 28600, name = "Stonebough Jerkin",                   cost = 0, isDisenchantHandoff = true }, -- 마력추출 인계 테스트
-                    { id = 22450, name = "Void Crystal",                        cost = 0, count = 2, isDisenchantResult = true, beneficiary = "마부테스트A" },  -- 마력추출 결과물 2개
-                    { id = 22450, name = "Void Crystal",                        cost = 0, count = 1, isDisenchantResult = true, beneficiary = "마부테스트B" },  -- 마력추출 결과물 1개
-                }
-
-                -- 도안무득 토글 효과가 분배 인원에 바로 보이도록:
-                -- 전체 테스트 득자는 5명이지만, 도안 4개는 전용 2명에게만 배정하고
-                -- 나머지 유상 에픽 17개는 다른 3명에게만 배정한다.
-                -- 따라서 도안무득 전에는 5명, 도안무득 후에는 3명으로 줄어든다.
-                local recipeNames = { "도안전용A", "도안전용B" }
-                local normalNames = { "전사테스트", "법사테스트", "힐러테스트" }
-
-                local s = ADDONSELF.sync
-                local soloSim = s and s:IsSoloSynctest() and not IsInRaid()
-
-                -- 진행 표시는 큐에 넣는 건수와 맞춰야 함. 먼저 배치 UI를 연 뒤, GetItemInfo 지연 없이 25건을 한꺼번에 큐에 넣는다.
-                if s and IsInRaid() and s.enabled and s:IsLedgerEditor() then
-                    s:BeginAddTransmitBatch(#testItems)
-                elseif soloSim then
-                    s:BeginAddTransmitBatch(#testItems)
+                -- IRATestData.lua 가 ADDONSELF.testData 에 박은 실측 entries 그대로 재생.
+                -- 시작골드/머니 변동은 박지 않고, 블랙리스트(켈타스 P4 + 황천의 쐐기 더미)는 추출 단계에서 이미 제외됨.
+                local data = ADDONSELF.testData
+                if not data or type(data.entries) ~= "table" or #data.entries == 0 then
+                    ADDONSELF.print("|cFFFF4444[테스트모드 오류]|r 테스트 데이터(IRATestData)가 로드되지 않았습니다.")
+                    return
                 end
 
-                local function applyTestItem(i, t, itemLink)
-                    local pool = t.isRecipe and recipeNames or normalNames
-                    local beneficiary = pool[((i - 1) % #pool) + 1]
-                    local finalBeneficiary = beneficiary
-                    local looter = beneficiary
-                    local winner = beneficiary
-                    if t.isDisenchantResult then
-                        finalBeneficiary = tostring(t.beneficiary or "마부테스트")
-                        looter = finalBeneficiary
-                        winner = finalBeneficiary
-                    end
-                    if t.isDisenchantHandoff then
-                        finalBeneficiary = "*마력추출*"
-                        winner = "*마력추출*"
+                for _, e in ipairs(data.entries) do
+                    local itemLink = e.item
+                    if not itemLink or itemLink == "" then
+                        itemLink = "|cffffffff|Hitem:" .. tostring(e.reliableItemID or 0) .. "::::::::70:::::|h[?]|h|r"
                     end
                     local detail = {
                         item = itemLink,
                         type = "ITEM",
-                        count = t.count or 1,
-                        reliableItemID = t.id,
-                        displayname = t.name,
-                        saleState = "confirmed",
-                        confirmed = true,
-                        looter = looter,
-                        winner = winner,
+                        count = e.count or 1,
+                        reliableItemID = e.reliableItemID,
+                        looter = e.looter or "",
+                        winner = e.winner or "",
                         isTestMode = true,
-                        isRecipeTest = t.isRecipe and true or false,
-                        isDisenchantResult = t.isDisenchantResult and true or false,
                     }
-                    if soloSim then
-                        s:EnqueueSimulatedAddFromCreditDetail(detail, finalBeneficiary, t.cost)
-                    else
-                        Database:AddEntry("CREDIT", detail, finalBeneficiary, t.cost, "confirmed", true)
+                    Database:AddEntry("CREDIT", detail, e.beneficiary or "", e.cost or 0, e.saleState or "confirmed", true)
+                    -- SV에 박혀있던 noBeneficiary 값 그대로 보존 (AddEntry 의 자동 계산 덮어씀)
+                    local ledger = Database:GetCurrentLedger()
+                    if ledger and ledger.items and #ledger.items > 0 then
+                        ledger.items[#ledger.items].noBeneficiary = e.noBeneficiary and true or false
                     end
                 end
 
-                -- 미캐시 ID를 1초 뒤에 넣으면 큐가 중간에 비어 n/25에서 멈춘 것처럼 보임 → 캐시 없어도 즉시 폴백 링크로 전부 생성
-                for i, t in ipairs(testItems) do
-                    local _, itemLink = GetItemInfo(t.id)
-                    if not itemLink then
-                        itemLink = "|cffffffff|Hitem:" .. t.id .. "::::::::60:::::|h[" .. t.name .. "]|h|r"
-                    end
-                    applyTestItem(i, t, itemLink)
-                end
-
-                if not soloSim then
-                    Database:OnLedgerItemsChange()
-                end
-
-                if soloSim then
-                    ADDONSELF.print("|cFF9966FF[테스트모드]|r 가상 수신 큐로 25건 재생 중 (/ira synctest off 로 끔). 카라잔 테마 샘플.")
-                else
-                    ADDONSELF.print("|cFF9966FF[테스트모드]|r 카라잔 테마 샘플 25개가 추가되었습니다. (마력추출 인계 2건, 결과물 2줄 포함)")
-                end
+                Database:OnLedgerItemsChange()
+                ADDONSELF.print(string.format("|cFF9966FF[테스트모드]|r %s — %d건 추가됨.", data.label or "테스트 데이터", #data.entries))
             end, function(caughtErr)
                 return tostring(caughtErr or "unknown")
             end)

@@ -26,6 +26,7 @@ IRATheme.lua
 
 IRAData.lua
 IRASync.lua
+IRATestData.lua
 IRAGui.lua
 
 IRACmd.lua
