@@ -1643,7 +1643,7 @@ function GUI:Init()
         countdownBtn:SetScript("OnClick", function()
             if not GUI.countdownActive then
                 GUI.countdownActive = true
-                GUI.currentCount = 5
+                GUI.currentCount = Database:GetGlobalConfigOrDefault("countdownStartSeconds", 5)
 
                 local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {
                     count = "--- %d",
@@ -4836,13 +4836,13 @@ function GUI:Init()
         -- 카운트다운 전역 변수
         GUI.countdownActive = false
         GUI.countdownTimer = nil
-        GUI.currentCount = 5
+        GUI.currentCount = Database:GetGlobalConfigOrDefault("countdownStartSeconds", 5)
 
         -- 매크로 실행
         macroBtn:SetScript("OnClick", function()
             if not GUI.countdownActive then
                 GUI.countdownActive = true
-                GUI.currentCount = 5
+                GUI.currentCount = Database:GetGlobalConfigOrDefault("countdownStartSeconds", 5)
 
                 -- 데이터베이스에서 메시지 가져오기
                 local messages = Database:GetGlobalConfigOrDefault("countdownmessages", {

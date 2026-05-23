@@ -632,6 +632,36 @@ RegEvent("ADDON_LOADED", function()
     cdHint:SetWidth(560); cdHint:SetJustifyH("LEFT")
     cdHint:SetText("|cff909090경매 카운트다운 시 공격대 채팅으로 송신되는 메시지. 카운트 메시지의 %d 가 숫자로 치환됩니다.|r")
 
+    -- 시작 카운트 입력 (임의 숫자, 1~60초)
+    local cdStartLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cdStartLbl:SetPoint("TOPLEFT", cdHint, "BOTTOMLEFT", 0, -10)
+    cdStartLbl:SetText("시작 카운트:")
+
+    local cdStartEdit = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    cdStartEdit:SetPoint("LEFT", cdStartLbl, "RIGHT", 14, 0)
+    cdStartEdit:SetSize(50, 24)
+    cdStartEdit:SetAutoFocus(false)
+    cdStartEdit:SetNumeric(true)
+    cdStartEdit:SetMaxLetters(3)
+    cdStartEdit:SetScript("OnEscapePressed", cdStartEdit.ClearFocus)
+    local function saveCdStart()
+        local n = tonumber(cdStartEdit:GetText()) or 5
+        if n < 1 then n = 1 end
+        if n > 60 then n = 60 end
+        Database:SetGlobalConfig("countdownStartSeconds", n)
+        cdStartEdit:SetText(tostring(n))
+    end
+    cdStartEdit:SetScript("OnEnterPressed", function(self) saveCdStart(); self:ClearFocus() end)
+    cdStartEdit:SetScript("OnEditFocusLost", saveCdStart)
+
+    local cdStartSuffix = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cdStartSuffix:SetPoint("LEFT", cdStartEdit, "RIGHT", 6, 0)
+    cdStartSuffix:SetText("초 (1~60)")
+
+    panel:HookScript("OnShow", function()
+        cdStartEdit:SetText(tostring(Database:GetGlobalConfigOrDefault("countdownStartSeconds", 5)))
+    end)
+
     local function buildCdRow(anchor, anchorOffsetY, key, labelText)
         local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         lbl:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, anchorOffsetY)
@@ -654,7 +684,7 @@ RegEvent("ADDON_LOADED", function()
         return lbl, edit
     end
 
-    local cdCountLbl,  cdCountEdit  = buildCdRow(cdHint,     -12, "count",  "카운트:")
+    local cdCountLbl,  cdCountEdit  = buildCdRow(cdStartLbl, -20, "count",  "카운트:")
     local cdClosedLbl, cdClosedEdit = buildCdRow(cdCountLbl,  -8, "closed", "마감:")
     local cdResumeLbl, cdResumeEdit = buildCdRow(cdClosedLbl, -8, "resume", "재개:")
 
