@@ -4,6 +4,21 @@ local strbyte = string.byte
 
 local RegEvent = ADDONSELF.regevent
 
+-- 자동 캡처(CHAT_MSG_LOOT) 제외 블랙리스트 기본값 — 폭풍우 요새 켈타스 P4 무기 페이즈 임시 아이템 8종.
+-- 부분 일치 매칭이라 정확한 풀네임 몰라도 일부만 입력하면 동작.
+-- 사용자는 /ira blacklist 또는 옵션 패널에서 추가/삭제 가능.
+local DEFAULT_ITEM_BLACKLIST = {
+    ["황천매듭 장궁"]      = true,  -- Netherstrand Longbow (활)
+    ["황천의 쐐기"]        = true,  -- Netherstrand 화살
+    ["황천의 쐐기 더미"]   = true,  -- Netherstrand 화살 묶음(stack)
+    ["우주 에너지 주입기"] = true,  -- Cosmic Infuser (둔기)
+    ["붕괴의 지팡이"]      = true,  -- Staff of Disintegration (지팡이)
+    ["황폐의 도끼"]        = true,  -- Devastation (양손 도끼)
+    ["차원 절단기"]        = true,  -- Warp Slicer (한손 도검)
+    ["위상 변화의 보루"]   = true,  -- Phaseshift Bulwark (방패)
+    ["무한의 비수"]        = true,  -- Infinity Blade (단검)
+}
+
 -- 성능 개선: GetItemInfo 캐시 (개선된 버전)
 local itemInfoCache = {}
 local maxCacheSize = 1000
@@ -1389,8 +1404,11 @@ function db:AddLoot(item, count, beneficiary, cost, force, skipZeroPrecreditStri
 
     -- 품질(장부 목록 고급+ 필터는 희귀+녹색도안 / 희귀+·영웅+ 는 최소 품질) — 아래는 자동 수집
     -- 자동 수집(force 아님): 도안류→고급(2) 이상, 그 외→희귀(3) 이상. 하급(0) 제외.
-    -- force 거래 등은 품질 무시(하급도 기록 가능)
+    -- force 거래 등은 품질·블랙리스트 무시(하급도 기록 가능, Ctrl+클릭 / 거래 자동기록 통과)
     if force ~= true then
+        if self:IsItemBlacklisted(itemName, itemLink) then
+            return false  -- 블랙리스트 부분일치 차단
+        end
         if not iraNonForcePickupQualityAllows(itemLink, itemRarity, itemType, itemSubType) then
             return false
         end
@@ -1532,6 +1550,45 @@ end
 function db:SetGlobalConfig(key, value)
     local config = self:GetGlobalConfig()
     config[key] = value
+end
+
+-- ====== 자동 캡처 블랙리스트 ======
+-- 저장 위치: GlobalConfig.itemBlacklist (계정 전역, 캐릭터/장부 공유)
+-- 데이터 형태: { [이름] = true, ... }  부분일치 검사
+
+function db:GetItemBlacklist()
+    -- 첫 호출 시 기본값을 *복사*해서 주입 (DEFAULT 테이블 자체가 오염되지 않도록).
+    -- 사용자가 비워두면 빈 테이블이 저장돼 다음부터 빈 상태 유지.
+    local config = self:GetGlobalConfig()
+    if config.itemBlacklist == nil then
+        local copy = {}
+        for k, v in pairs(DEFAULT_ITEM_BLACKLIST) do copy[k] = v end
+        config.itemBlacklist = copy
+    end
+    return config.itemBlacklist
+end
+
+function db:IsItemBlacklisted(itemName, itemLink)
+    local list = self:GetItemBlacklist()
+    if type(list) ~= "table" or not next(list) then return false end
+    local target = itemName
+    if (not target or target == "") and itemLink then
+        target = GetItemInfo(itemLink) or itemLink
+    end
+    if not target or target == "" then return false end
+    local lower = string.lower(target)
+    for entry in pairs(list) do
+        if entry ~= "" then
+            if string.find(lower, string.lower(entry), 1, true) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function db:SetItemBlacklist(tbl)
+    self:SetGlobalConfig("itemBlacklist", tbl or {})
 end
 
 -- 전역 설정 강제 저장 함수

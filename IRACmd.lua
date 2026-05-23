@@ -566,17 +566,17 @@ RegEvent("ADDON_LOADED", function()
                     if item.type == "CREDIT" and item.cost and item.cost > 0
                             and (item.costtype == nil or item.costtype == "GOLD")
                             and not (item.detail and item.detail.item) then
-                        manualRevenue = manualRevenue + item.cost * 10000
+                        manualRevenue = manualRevenue + item.cost
                     end
                 end
                 local autoRevenue  = (revenue or 0) - manualRevenue
                 local distribution = profit or 0
-                local fmt = ADDONSELF.GetMoneyStringL or GetMoneyString
-                tooltip:AddDoubleLine("아이템",   fmt(autoRevenue,   true), 1,1,1, 1,1,1)
-                tooltip:AddDoubleLine("총수익",   "+" .. fmt(manualRevenue, true), 1,1,1, 0.6,1,0.6)
-                tooltip:AddDoubleLine("총지출",   "-" .. fmt(expense or 0,  true), 1,1,1, 1,0.7,0.7)
-                tooltip:AddDoubleLine("총분배금", fmt(distribution,  true), 1,1,1, 1,0.82,0)
-                tooltip:AddDoubleLine("인당",    fmt(avg or 0,      true), 1,1,1, 0.6,0.85,1)
+                local function fmt(g) return formatGoldComma(g) .. "골드" end
+                tooltip:AddDoubleLine("총수익",   fmt(autoRevenue),       1,1,1, 1,1,1)
+                tooltip:AddDoubleLine("+수익",    "+" .. fmt(manualRevenue), 1,1,1, 0.6,1,0.6)
+                tooltip:AddDoubleLine("-지출",    "-" .. fmt(expense or 0),  1,1,1, 1,0.7,0.7)
+                tooltip:AddDoubleLine("총분배금", fmt(distribution),       1,1,1, 1,0.82,0)
+                tooltip:AddDoubleLine("인당",     fmt(avg or 0),           1,1,1, 0.6,0.85,1)
             end
             tooltip:AddLine(" ")
             tooltip:AddLine("|cffffff00좌클릭|r 경매창", 1, 1, 1)
@@ -607,76 +607,222 @@ RegEvent("ADDON_LOADED", function()
     title:SetPoint("TOPLEFT", 16, -16)
     local iraVer = (ADDONSELF.GetAddOnVersion and ADDONSELF.GetAddOnVersion()) or "1.00"
     title:SetText("IberisRaidAuction Ver. " .. iraVer)
-    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -12)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -64, 10)
-    if scroll.ScrollBar then
-        scroll.ScrollBar:ClearAllPoints()
-        scroll.ScrollBar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 2, -16)
-        scroll.ScrollBar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 2, 16)
+
+    -- 섹션 구분 가로줄 헬퍼
+    local function makeDivider(aboveAnchor)
+        local div = panel:CreateTexture(nil, "ARTWORK")
+        div:SetColorTexture(0.4, 0.4, 0.4, 0.5)
+        div:SetHeight(1)
+        div:SetPoint("LEFT", panel, "LEFT", 16, 0)
+        div:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+        div:SetPoint("BOTTOM", aboveAnchor, "TOP", 0, 6)
+        return div
     end
 
-    local desc = CreateFrame("Frame", nil, scroll)
-    desc:SetWidth(500)
-    desc:SetHeight(1)
-    scroll:SetScrollChild(desc)
+    -- ====== 카운트다운 메시지 편집 UI (scroll 바로 아래) ======
+    local CD_DEFAULTS = { count = "--- %d", closed = "--- 입찰 마감 ---", resume = "--- 신규 입찰 ! 재개합니다 ---" }
 
-    local descText = desc:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    descText:SetPoint("TOPLEFT", 0, 0)
-    descText:SetWidth(500)
-    descText:SetJustifyH("LEFT")
-    descText:SetSpacing(3)
-    descText:SetText(
-        "|cFFFFD100골드 분배(GDKP) 장부 애드온|r\n\n" ..
+    local cdHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    cdHeader:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -24)
+    cdHeader:SetText("카운트다운 메시지")
+    makeDivider(cdHeader)
 
-        "|cFF00FF00[ 기본 사용법 ]|r\n" ..
-        "• 미니맵 아이콘 |cFFFFFFFF좌클릭|r : 설정 패널 열기/닫기\n" ..
-        "• 미니맵 아이콘 |cFFFFFFFF우클릭|r : 장부 창 열기/닫기\n" ..
-        "• 슬래시 명령어 : /ira  /iberisraidauction  (레거시 : /br)\n\n" ..
+    local cdHint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cdHint:SetPoint("TOPLEFT", cdHeader, "BOTTOMLEFT", 0, -4)
+    cdHint:SetWidth(560); cdHint:SetJustifyH("LEFT")
+    cdHint:SetText("|cff909090경매 카운트다운 시 공격대 채팅으로 송신되는 메시지. 카운트 메시지의 %d 가 숫자로 치환됩니다.|r")
 
-        "|cFF00FF00[ 상단 버튼 설명 ]|r\n" ..
-        "• |cFF00FF00Sync ON/OFF|r : 공격대의 |cFFFFFFFF공대장 또는 경매담당자|r 만 바꿀 수 있습니다. 비공대 상태에서는 회색으로 보이며 툴팁으로 상태를 확인할 수 있습니다.\n" ..
-        "• |cFF1EFF00고급+|r / |cFF0070DD희귀+|r / |cFFA335EE영웅+|r : 목록 필터. 고급+=|cFFFFFFFF희귀 이상 전부 + 녹색은 도안·제작법만|r(백색·하급·비도안 녹색 숨김). 희귀+=희귀 이상, 영웅+=영웅·전설. |cFFFFCC00채팅 자동 기록|r도 동일 등급 기준입니다.\n" ..
-        "• |cFF00FF00도안무득|r : 활성화 시 모든 도안(레시피) 아이템을 자동으로 무득처리합니다.\n" ..
-        "• |cFF9966FF테스트모드|r : 카라잔(TBC 2.0/2.1) 실제 드랍 기준 가상 아이템 |cFFFFFFFF25개|r(트래시 도안 4, 보스 에픽 17, 마력추출 인계 2, 결과물 2)을 장부에 추가합니다.\n" ..
-        "• |cFFDDA050—|r (최소화) / |cFFFF6666X|r (닫기) : 장부 창을 최소화하거나 닫습니다.\n\n" ..
+    local function buildCdRow(anchor, anchorOffsetY, key, labelText)
+        local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, anchorOffsetY)
+        lbl:SetText(labelText)
+        lbl:SetWidth(60); lbl:SetJustifyH("LEFT")
 
-        "|cFF00FF00[ 거래 · 마력추출(뽀각/마부) ]|r\n" ..
-        "• |cFFFFFFFF자동입력|r 은 항상 켜져 있으며 |cFFFFFFFF공격대|r 에 있을 때만 거래 완료가 장부에 반영됩니다.\n" ..
-        "• 마부사가 채팅 획득으로 쌓인 추출 재료(낙찰 0)를 |cFFFFFFFF공대장·경매담당에게 거래|r로 넘기면, |cFFFFFFFF판매자(나) 이름·같은 아이템·낙찰 0|r 인 줄을 거래 수량만큼 맞춰 정리한 뒤 수신자 기준으로 반영해 |cFFFFFFFF중복 줄이 남지 않게|r 합니다(상대가 골드를 주는 낙찰 거래도 동일한 방식으로 판매자 줄을 짝지어 뺍니다).\n" ..
-        "• |cFFFFFFFF공격대|r 에서 |cFFFFFFFF내가 거래창에 아이템을 올리고 상대는 골드 0|r 인 거래를 완료하면 획득자가 |cFFFFFFFF*마력추출*|r 로 기록됩니다(뽀각으로 넘긴 물건을 마부에게 넘기는 용도의 표기). |cFFAAAAAA*|r 문자는 캐릭터 이름에 쓸 수 없어 닉네임과 겹치지 않습니다.\n" ..
-        "• 위와 같이 |cFFFFFFFF낙찰가 0|r 인 줄은 올분배/무득분 계산의 「실제 획득자(낙찰 있는 사람)」 수에 |cFFFFFFFF포함되지 않습니다|r. 득자가 |cFFFFFFFF*마력추출*|r 이고 낙찰이 0이면 |cFFFFFFFF무득 체크가 자동|r 으로 켜집니다.\n\n" ..
+        local edit = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+        edit:SetPoint("LEFT", lbl, "RIGHT", 14, 0)
+        edit:SetSize(380, 24)
+        edit:SetAutoFocus(false)
+        edit:SetMaxLetters(200)
+        edit:SetScript("OnEscapePressed", edit.ClearFocus)
+        local function save()
+            local msgs = Database:GetGlobalConfigOrDefault("countdownmessages", CD_DEFAULTS)
+            msgs[key] = edit:GetText() or ""
+            Database:SetGlobalConfig("countdownmessages", msgs)
+        end
+        edit:SetScript("OnEnterPressed", function(self) save(); self:ClearFocus() end)
+        edit:SetScript("OnEditFocusLost", save)
+        return lbl, edit
+    end
 
-        "|cFF00FF00[ 장부 테이블 ]|r\n" ..
-        "• |cFFFFFFFF스피커 아이콘|r : 아이템 아이콘 좌측의 스피커를 클릭하면 공격대 경보로 아이템 링크를 알리고, 공격대 채팅에 경매 시작 메시지를 전송합니다.\n" ..
-        "• |cFFFFFFFF아이템|r : 기록된 아이템 이름. 클릭하면 채팅창에 아이템 링크를 삽입합니다.\n" ..
-        "• |cFFFFFFFF획득자|r : 아이템을 획득한 사람 이름. 직접 입력하거나 자동완성됩니다.\n" ..
-        "• |cFFFFFFFF낙찰가격|r : 골드 금액. 숫자 입력 후 포커스를 벗어나면 천단위 콤마가 자동 표시됩니다. 우측 정렬.\n" ..
-        "• |cFFFFFFFF무득처리|r : 체크하면 해당 아이템은 분배 계산에서 제외됩니다.\n" ..
-        "• |cFFFFFFFF우클릭|r : 아이템 행을 우클릭하면 삭제할 수 있습니다.\n\n" ..
+    local cdCountLbl,  cdCountEdit  = buildCdRow(cdHint,     -12, "count",  "카운트:")
+    local cdClosedLbl, cdClosedEdit = buildCdRow(cdCountLbl,  -8, "closed", "마감:")
+    local cdResumeLbl, cdResumeEdit = buildCdRow(cdClosedLbl, -8, "resume", "재개:")
 
-        "|cFF00FF00[ 카운트다운 (경매) ]|r\n" ..
-        "• |cFF00FF00▶ 시작|r : 5 > 4 > 3 > 2 > 1 카운트다운을 공격대 채팅에 전송합니다.\n" ..
-        "• |cFFFF0000● 정지|r : 카운트다운을 즉시 중지하고 재개 메시지를 전송합니다.\n" ..
-        "• |cFF00FF00자동|r / |cFF888888수동|r : 자동 모드에서는 공격대원이 숫자가 포함된 메시지를 보내면 자동으로 카운트다운이 정지되고 재개됩니다. 숫자(1~9), 한글 숫자(백, 천, 만 등)에 반응합니다.\n\n" ..
+    local cdResetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    cdResetBtn:SetPoint("TOPLEFT", cdResumeLbl, "BOTTOMLEFT", 0, -10)
+    cdResetBtn:SetSize(110, 22)
+    cdResetBtn:SetText("기본값 복원")
+    cdResetBtn:SetScript("OnClick", function()
+        Database:SetGlobalConfig("countdownmessages", { count = CD_DEFAULTS.count, closed = CD_DEFAULTS.closed, resume = CD_DEFAULTS.resume })
+        cdCountEdit:SetText(CD_DEFAULTS.count)
+        cdClosedEdit:SetText(CD_DEFAULTS.closed)
+        cdResumeEdit:SetText(CD_DEFAULTS.resume)
+    end)
 
-        "|cFF00FF00[ 분배 설정 ]|r\n" ..
-        "• |cFFFFFFFF분배 인원 설정|r : 분배 인원수를 직접 입력합니다. 공대 인원에 따라 기본값이 자동 설정됩니다 (10인 이하 → 10, 11~25인 → 25, 26인 이상 → 40).\n" ..
-        "• |cFF00FF00올분배|r (녹색) : 전체 인원으로 균등 분배합니다.\n" ..
-        "• |cFFFF0000무득분|r (적색) : 획득자를 제외한 인원으로 분배합니다.\n\n" ..
+    local function refreshCdMessages()
+        local msgs = Database:GetGlobalConfigOrDefault("countdownmessages", CD_DEFAULTS)
+        cdCountEdit:SetText(msgs.count or CD_DEFAULTS.count)
+        cdClosedEdit:SetText(msgs.closed or CD_DEFAULTS.closed)
+        cdResumeEdit:SetText(msgs.resume or CD_DEFAULTS.resume)
+    end
+    panel:HookScript("OnShow", refreshCdMessages)
 
-        "|cFF00FF00[ 출력 / 내보내기 ]|r\n" ..
-        "• |cFFFFFFFF상세기록|r : 공격대에서는 장부 내용을 공격대 채팅에 순차 전송하고, 비공대에서는 나만 보는 텍스트 창으로 표시합니다.\n" ..
-        "• |cFFFFFFFF요약기록|r : 공격대에서는 수익/지출 요약을 채팅에 전송하고, 비공대에서는 나만 보는 텍스트 창으로 표시합니다.\n" ..
-        "• |cFFFFFFFF텍스트로 저장|r : 장부 내용을 텍스트로 변환하여 복사할 수 있습니다.\n" ..
-        "• 모든 금액은 천단위 콤마와 '골드' 단위로 표시됩니다.\n\n" ..
+    -- ====== autoClear 체크박스 (카운트다운 reset 아래) ======
+    local autoClearCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    autoClearCheck:SetPoint("TOPLEFT", cdResetBtn, "BOTTOMLEFT", -6, -18)
+    autoClearCheck:SetSize(22, 22)
+    makeDivider(autoClearCheck)
+    local autoClearLbl = autoClearCheck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    autoClearLbl:SetPoint("LEFT", autoClearCheck, "RIGHT", 2, 0)
+    autoClearLbl:SetText("공격대 첫 인스턴스 입장 시 장부 초기화 확인 (같은 공대 재입던 / 사망 후 부활은 묻지 않음)")
+    autoClearCheck:SetScript("OnClick", function(self)
+        Database:SetGlobalConfig("autoClearOnDungeonEnter", self:GetChecked() and true or false)
+    end)
+    panel:HookScript("OnShow", function()
+        autoClearCheck:SetChecked(Database:GetGlobalConfigOrDefault("autoClearOnDungeonEnter", true) and true or false)
+    end)
 
-        "|cFF00FF00[ 슬래시 명령어 ]|r\n" ..
-        "• /ira toggle : 더 이상 사용하지 않음 (자동기록은 항상 켜짐)\n" ..
-        "• /ira countdown : 카운트다운 메시지 설정 확인\n" ..
-        "• /ira autoclear : 공격대 첫 입던 시 장부 초기화 확인 켜기/끄기 (같은 공대 재입던/사망 부활은 묻지 않음)\n"
-    )
-    desc:SetHeight(descText:GetStringHeight() + 20)
+    -- ====== 자동 캡처 블랙리스트 UI (autoClear 아래) ======
+    local blHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    blHeader:SetPoint("TOPLEFT", autoClearCheck, "BOTTOMLEFT", 6, -22)
+    blHeader:SetText("자동 캡처 차단 목록")
+    makeDivider(blHeader)
+
+    local blHint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    blHint:SetPoint("TOPLEFT", blHeader, "BOTTOMLEFT", 0, -4)
+    blHint:SetWidth(560); blHint:SetJustifyH("LEFT")
+    blHint:SetText("|cff909090아이템 이름 부분일치로 차단. 기본값: 폭풍우 요새 켈타스 P4 무기/쐐기 8종.|r")
+
+    local addLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    addLbl:SetPoint("TOPLEFT", blHint, "BOTTOMLEFT", 0, -8)
+    addLbl:SetText("새 항목 추가:")
+
+    local addEdit = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+    addEdit:SetPoint("TOPLEFT", addLbl, "BOTTOMLEFT", 8, -6)
+    addEdit:SetSize(380, 24)
+    addEdit:SetAutoFocus(false)
+    addEdit:SetMaxLetters(120)
+    addEdit:SetScript("OnEscapePressed", addEdit.ClearFocus)
+
+    local addBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    addBtn:SetPoint("LEFT", addEdit, "RIGHT", 8, 0)
+    addBtn:SetSize(60, 22)
+    addBtn:SetText("추가")
+
+    local listLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    listLbl:SetPoint("TOPLEFT", addEdit, "BOTTOMLEFT", -8, -12)
+    listLbl:SetText("등록된 아이템:")
+
+    local listBg = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    listBg:SetPoint("TOPLEFT", listLbl, "BOTTOMLEFT", 6, -4)
+    listBg:SetSize(450, 110)
+    listBg:SetBackdrop({
+        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12, tile = false,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    listBg:SetBackdropColor(0, 0, 0, 0.45)
+    listBg:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+
+    local blScrollFrame = CreateFrame("ScrollFrame", nil, listBg, "UIPanelScrollFrameTemplate")
+    blScrollFrame:SetPoint("TOPLEFT", 6, -6)
+    blScrollFrame:SetPoint("BOTTOMRIGHT", -28, 6)
+
+    local blScrollChild = CreateFrame("Frame", nil, blScrollFrame)
+    blScrollChild:SetSize(1, 1)
+    blScrollFrame:SetScrollChild(blScrollChild)
+
+    -- 행 풀
+    local rows = {}
+    local ROW_H = 22
+
+    local function ensureRow(i)
+        local row = rows[i]
+        if row then return row end
+        row = CreateFrame("Frame", nil, blScrollChild)
+        row:SetSize(400, ROW_H)
+        row:SetPoint("TOPLEFT", blScrollChild, "TOPLEFT", 0, -(i - 1) * (ROW_H + 1))
+
+        row.label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        row.label:SetPoint("LEFT", row, "LEFT", 6, 0)
+        row.label:SetJustifyH("LEFT")
+        row.label:SetTextColor(1, 1, 1)
+
+        row.del = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+        row.del:SetSize(22, 20)
+        row.del:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        row.del:SetText("X")
+
+        rows[i] = row
+        return row
+    end
+
+    local function rebuildBlacklist()
+        local list = Database:GetItemBlacklist()
+        local items = {}
+        for entry in pairs(list) do table.insert(items, entry) end
+        table.sort(items)
+
+        local count = #items
+        blScrollChild:SetHeight(math.max(1, count * (ROW_H + 1)))
+
+        for i = 1, math.max(count, #rows) do
+            local row = rows[i]
+            local name = items[i]
+            if name then
+                row = ensureRow(i)
+                row.label:SetText(name)
+                row.del:SetScript("OnClick", function()
+                    local cur = Database:GetItemBlacklist()
+                    cur[name] = nil
+                    Database:SetItemBlacklist(cur)
+                    rebuildBlacklist()
+                end)
+                row:Show()
+            elseif row then
+                row:Hide()
+            end
+        end
+    end
+
+    addBtn:SetScript("OnClick", function()
+        local v = (addEdit:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if v == "" then return end
+        local list = Database:GetItemBlacklist()
+        list[v] = true
+        Database:SetItemBlacklist(list)
+        addEdit:SetText("")
+        rebuildBlacklist()
+    end)
+    addEdit:SetScript("OnEnterPressed", function(self)
+        addBtn:Click()
+        self:ClearFocus()
+    end)
+
+    local resetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    resetBtn:SetPoint("TOPLEFT", listBg, "BOTTOMLEFT", -6, -8)
+    resetBtn:SetSize(110, 22)
+    resetBtn:SetText("기본값 복원")
+    resetBtn:SetScript("OnClick", function()
+        IberisRaidAuctionGlobalConfig = IberisRaidAuctionGlobalConfig or {}
+        IberisRaidAuctionGlobalConfig.itemBlacklist = nil
+        Database:GetItemBlacklist()  -- 다시 호출하면 기본값 재주입됨
+        rebuildBlacklist()
+    end)
+
+    panel:HookScript("OnShow", rebuildBlacklist)
+
     ADDONSELF._settingsPanel = panel
 
     if Settings and Settings.RegisterCanvasLayoutCategory then
@@ -1396,6 +1542,7 @@ local function HandleCommand(msg)
         Print("[/ira debugcost] 낙찰가 입력·탭 문제 추적(채팅 로그, 다시 입력 시 끔)")
         Print("[/ira splitstack <n>|clear] 가장 큰 묶음을 n개+나머지로 임시 분리")
         Print("[/ira recoverstack <itemID>] 같은 아이템 줄 상태를 맞춰 다시 묶이게 함(임시 복구)")
+        Print("[/ira blacklist] 자동 캡처 차단 목록 보기/편집 (부분일치)")
     elseif cmd == "debugcost" then
         _G.IRA_DEBUG_COST_EDIT = not _G.IRA_DEBUG_COST_EDIT
         Print("|cFF00CCFF[IberisRaidAuction]|r 낙찰가 디버그: " .. (_G.IRA_DEBUG_COST_EDIT and "|cFF00FF00켜짐|r — 채팅창에 [IRA cost #…] 로그가 뜹니다." or "꺼짐"))
@@ -1484,6 +1631,61 @@ local function HandleCommand(msg)
         else
             Print("오류: 알 수 없는 하위 명령어입니다.")
             Print("'/ira countdown' 를 입력하여 사용법을 확인하세요.")
+        end
+    elseif cmd == "blacklist" then
+        -- /ira blacklist                  → 목록 표시
+        -- /ira blacklist add <이름>       → 부분일치 항목 추가
+        -- /ira blacklist remove <이름>    → 제거
+        -- /ira blacklist clear            → 전부 비움
+        if not what then
+            local list = Database:GetItemBlacklist()
+            Print("=== 자동 캡처 블랙리스트 ===")
+            local count = 0
+            for entry in pairs(list) do
+                Print("  - " .. entry)
+                count = count + 1
+            end
+            if count == 0 then Print("  (비어 있음)") end
+            Print("사용법: /ira blacklist add <이름> | remove <이름> | clear | test <이름>")
+            return
+        end
+
+        local arg = (rest or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local list = Database:GetItemBlacklist()
+
+        if what == "add" then
+            if arg == "" then Print("이름을 입력하세요. 예: /ira blacklist add 황천의 쐐기"); return end
+            list[arg] = true
+            Database:SetItemBlacklist(list)
+            Print("[blacklist] 추가됨: " .. arg)
+        elseif what == "remove" or what == "rm" then
+            if arg == "" then Print("이름을 입력하세요"); return end
+            local removed = false
+            for key in pairs(list) do
+                if string.lower(key) == string.lower(arg) then
+                    list[key] = nil
+                    removed = true
+                end
+            end
+            if removed then
+                Database:SetItemBlacklist(list)
+                Print("[blacklist] 제거됨: " .. arg)
+            else
+                Print("[blacklist] 일치 없음: " .. arg)
+            end
+        elseif what == "clear" then
+            Database:SetItemBlacklist({})
+            Print("[blacklist] 전부 비움")
+        elseif what == "test" then
+            if arg == "" then Print("이름 또는 아이템 링크를 입력하세요. 예: /ira blacklist test 황천매듭 장궁"); return end
+            local hit = Database:IsItemBlacklisted(arg, nil)
+            if hit then
+                Print(string.format("[blacklist] %s → |cFFFF6666차단됨|r (자동 캡처 X)", arg))
+            else
+                Print(string.format("[blacklist] %s → |cFF66FF66통과|r (자동 캡처 O)", arg))
+            end
+        else
+            Print("사용법: /ira blacklist add <이름> | remove <이름> | clear | test <이름> | test <이름>")
         end
     elseif cmd == "autoclear" then
         -- 자동 초기화 설정
