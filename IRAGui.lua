@@ -3293,8 +3293,20 @@ function GUI:Init()
                 return
             end
             local equipInfo = GetEquipInfoText(itemLink)
-            local warningMsg = itemLink .. equipInfo
-            local auctionMsg = "=== " .. itemLink .. equipInfo .. " 경매 시작합니다. ==="
+            local ANNOUNCE_DEFAULTS = { warning = "%s", auction = "=== %s 경매 시작합니다. ===" }
+            local msgs = Database:GetGlobalConfigOrDefault("announceMessages", ANNOUNCE_DEFAULTS)
+            local warningPattern = (msgs and msgs.warning) or ANNOUNCE_DEFAULTS.warning
+            local auctionPattern = (msgs and msgs.auction) or ANNOUNCE_DEFAULTS.auction
+            -- 패턴의 %s에 아이템링크를 치환한 뒤, 장착정보는 결과 뒤에 자동 append.
+            -- 패턴이 빈 문자열이면 해당 줄은 송신하지 않음 (한 줄만 보내고 싶을 때).
+            local function fmt(pat)
+                if not pat or pat == "" then return nil end
+                local ok, res = pcall(string.format, pat, itemLink)
+                if not ok or not res then return nil end
+                return res .. equipInfo
+            end
+            local warningMsg = fmt(warningPattern)
+            local auctionMsg = fmt(auctionPattern)
             if IsInRaid() then
                 local myRank = 0
                 local pName = UnitName("player")
@@ -3302,16 +3314,19 @@ function GUI:Init()
                     local name, rank = GetRaidRosterInfo(i)
                     if name == pName then myRank = rank or 0; break end
                 end
-                if myRank > 0 then
-                    SendChatMessage(warningMsg, "RAID_WARNING")
-                    SendChatMessage(auctionMsg, "RAID")
-                else
-                    SendChatMessage(warningMsg, "RAID")
+                if warningMsg then
+                    if myRank > 0 then
+                        SendChatMessage(warningMsg, "RAID_WARNING")
+                    else
+                        SendChatMessage(warningMsg, "RAID")
+                    end
+                end
+                if auctionMsg then
                     SendChatMessage(auctionMsg, "RAID")
                 end
             else
-                ADDONSELF.print(warningMsg)
-                ADDONSELF.print(auctionMsg)
+                if warningMsg then ADDONSELF.print(warningMsg) end
+                if auctionMsg then ADDONSELF.print(auctionMsg) end
             end
         end
 
@@ -4168,7 +4183,7 @@ function GUI:Init()
                     local signalButton = cellFrame.signalButton
                     if not signalButton then
                         signalButton = CreateFrame("Button", nil, cellFrame, "BackdropTemplate")
-                        signalButton:SetSize(40, 14)
+                        signalButton:SetSize(40, 16)
                         signalButton:SetPoint("CENTER", cellFrame, "CENTER")
                         signalButton:SetBackdrop({
                             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -4181,55 +4196,40 @@ function GUI:Init()
                         signalButton:SetBackdropColor(0.08, 0.08, 0.08, 0.92)
                         signalButton:SetBackdropBorderColor(0.35, 0.35, 0.38, 1.0)
 
-                        local function createLamp(offsetX)
-                            local lamp = signalButton:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-                            lamp:SetPoint("CENTER", signalButton, "CENTER", offsetX, 0)
-                            lamp:SetText("●")
-                            if STANDARD_TEXT_FONT then
-                                lamp:SetFont(STANDARD_TEXT_FONT, 9, "OUTLINE")
-                            end
-                            return lamp
-                        end
+                        local label = signalButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                        label:SetPoint("CENTER", signalButton, "CENTER", 0, 0)
+                        signalButton.label = label
 
-                        signalButton.redLamp = createLamp(-10)
-                        signalButton.yellowLamp = createLamp(0)
-                        signalButton.greenLamp = createLamp(10)
                         cellFrame.signalButton = signalButton
-                    end
-
-                    local function setLamp(lamp, active, r, g, b)
-                        if not lamp then
-                            return
-                        end
-                        if active then
-                            lamp:SetTextColor(r, g, b, 1)
-                            lamp:SetAlpha(1)
-                        else
-                            lamp:SetTextColor(r * 0.35, g * 0.35, b * 0.35, 1)
-                            lamp:SetAlpha(0.45)
-                        end
                     end
 
                     local itemIdx = idx
                     local isRowConfirmable = itemIdx and entry and true or false
                     local signalState = LedgerEntrySignalState(entry)
-                    if isRowConfirmable then
-                        signalState = LedgerEntrySignalState(entry)
+
+                    local label = signalButton.label
+                    if signalState == "confirmed" then
+                        label:SetText("완료")
+                        label:SetTextColor(0.20, 0.82, 0.20, 1)
+                    elseif signalState == "ready" then
+                        label:SetText("입찰")
+                        label:SetTextColor(0.96, 0.78, 0.12, 1)
+                    else
+                        label:SetText("대기")
+                        label:SetTextColor(0.65, 0.65, 0.65, 1)
                     end
-                    setLamp(signalButton.redLamp, signalState == "draft", 0.88, 0.22, 0.22)
-                    setLamp(signalButton.yellowLamp, signalState == "ready", 0.96, 0.78, 0.12)
-                    setLamp(signalButton.greenLamp, signalState == "confirmed", 0.20, 0.82, 0.20)
+
                     signalButton:SetShown(isRowConfirmable and true or false)
                     signalButton:SetEnabled(false)
                     signalButton:SetAlpha(isRowConfirmable and 1 or 0.45)
                     signalButton:SetScript("OnEnter", function(self)
                         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                         if signalState == "confirmed" then
-                            GameTooltip:SetText("초록불: 확정")
+                            GameTooltip:SetText("완료: 정산 확정")
                         elseif signalState == "ready" then
-                            GameTooltip:SetText("노란불: 낙찰가 입력됨")
+                            GameTooltip:SetText("입찰: 낙찰가 입력됨")
                         else
-                            GameTooltip:SetText("빨간불: 미확정")
+                            GameTooltip:SetText("대기: 미확정")
                         end
                         GameTooltip:Show()
                     end)

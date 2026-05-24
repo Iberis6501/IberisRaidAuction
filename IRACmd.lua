@@ -603,6 +603,16 @@ RegEvent("ADDON_LOADED", function()
     -- 설정 패널 등록
     local panel = CreateFrame("Frame")
     panel.name = "IberisRaidAuction"
+
+    -- ElvUI 톤 백드롭 (다크 평면 + 1px 보더)
+    if BackdropTemplateMixin then
+        Mixin(panel, BackdropTemplateMixin)
+        panel:HookScript("OnSizeChanged", panel.OnBackdropSizeChanged)
+    end
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyFrame then
+        ADDONSELF.theme:ApplyFrame(panel)
+    end
+
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     local iraVer = (ADDONSELF.GetAddOnVersion and ADDONSELF.GetAddOnVersion()) or "1.00"
@@ -622,7 +632,7 @@ RegEvent("ADDON_LOADED", function()
     -- ====== 카운트다운 메시지 편집 UI (scroll 바로 아래) ======
     local CD_DEFAULTS = { count = "--- %d", closed = "--- 입찰 마감 ---", resume = "--- 신규 입찰 ! 재개합니다 ---" }
 
-    local cdHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local cdHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     cdHeader:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -24)
     cdHeader:SetText("카운트다운 메시지")
     makeDivider(cdHeader)
@@ -653,6 +663,9 @@ RegEvent("ADDON_LOADED", function()
     end
     cdStartEdit:SetScript("OnEnterPressed", function(self) saveCdStart(); self:ClearFocus() end)
     cdStartEdit:SetScript("OnEditFocusLost", saveCdStart)
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyEditBox then
+        ADDONSELF.theme:ApplyEditBox(cdStartEdit)
+    end
 
     local cdStartSuffix = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     cdStartSuffix:SetPoint("LEFT", cdStartEdit, "RIGHT", 6, 0)
@@ -681,6 +694,9 @@ RegEvent("ADDON_LOADED", function()
         end
         edit:SetScript("OnEnterPressed", function(self) save(); self:ClearFocus() end)
         edit:SetScript("OnEditFocusLost", save)
+        if ADDONSELF.theme and ADDONSELF.theme.ApplyEditBox then
+            ADDONSELF.theme:ApplyEditBox(edit)
+        end
         return lbl, edit
     end
 
@@ -698,6 +714,9 @@ RegEvent("ADDON_LOADED", function()
         cdClosedEdit:SetText(CD_DEFAULTS.closed)
         cdResumeEdit:SetText(CD_DEFAULTS.resume)
     end)
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyButton then
+        ADDONSELF.theme:ApplyButton(cdResetBtn)
+    end
 
     local function refreshCdMessages()
         local msgs = Database:GetGlobalConfigOrDefault("countdownmessages", CD_DEFAULTS)
@@ -707,9 +726,70 @@ RegEvent("ADDON_LOADED", function()
     end
     panel:HookScript("OnShow", refreshCdMessages)
 
-    -- ====== autoClear 체크박스 (카운트다운 reset 아래) ======
+    -- ====== 경매 시작 메시지 편집 UI (스피커 버튼) ======
+    local AN_DEFAULTS = { warning = "%s", auction = "=== %s 경매 시작합니다. ===" }
+
+    local anHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    anHeader:SetPoint("TOPLEFT", cdResetBtn, "BOTTOMLEFT", 0, -22)
+    anHeader:SetText("경매 시작 메시지")
+    makeDivider(anHeader)
+
+    local anHint = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    anHint:SetPoint("TOPLEFT", anHeader, "BOTTOMLEFT", 0, -4)
+    anHint:SetWidth(560); anHint:SetJustifyH("LEFT")
+    anHint:SetText("|cff909090스피커 버튼 클릭 시 송신. %s 는 아이템링크로 치환되고 장착정보는 자동으로 뒤에 붙음. 빈칸이면 해당 줄은 보내지 않음.|r")
+
+    local function buildAnRow(anchor, anchorOffsetY, key, labelText)
+        local lbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, anchorOffsetY)
+        lbl:SetText(labelText)
+        lbl:SetWidth(60); lbl:SetJustifyH("LEFT")
+
+        local edit = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
+        edit:SetPoint("LEFT", lbl, "RIGHT", 14, 0)
+        edit:SetSize(380, 24)
+        edit:SetAutoFocus(false)
+        edit:SetMaxLetters(200)
+        edit:SetScript("OnEscapePressed", edit.ClearFocus)
+        local function save()
+            local msgs = Database:GetGlobalConfigOrDefault("announceMessages", AN_DEFAULTS)
+            msgs[key] = edit:GetText() or ""
+            Database:SetGlobalConfig("announceMessages", msgs)
+        end
+        edit:SetScript("OnEnterPressed", function(self) save(); self:ClearFocus() end)
+        edit:SetScript("OnEditFocusLost", save)
+        if ADDONSELF.theme and ADDONSELF.theme.ApplyEditBox then
+            ADDONSELF.theme:ApplyEditBox(edit)
+        end
+        return lbl, edit
+    end
+
+    local anWarnLbl,    anWarnEdit    = buildAnRow(anHint,    -10, "warning", "경고:")
+    local anAuctionLbl, anAuctionEdit = buildAnRow(anWarnLbl,  -8, "auction", "채팅:")
+
+    local anResetBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    anResetBtn:SetPoint("TOPLEFT", anAuctionLbl, "BOTTOMLEFT", 0, -10)
+    anResetBtn:SetSize(110, 22)
+    anResetBtn:SetText("기본값 복원")
+    anResetBtn:SetScript("OnClick", function()
+        Database:SetGlobalConfig("announceMessages", { warning = AN_DEFAULTS.warning, auction = AN_DEFAULTS.auction })
+        anWarnEdit:SetText(AN_DEFAULTS.warning)
+        anAuctionEdit:SetText(AN_DEFAULTS.auction)
+    end)
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyButton then
+        ADDONSELF.theme:ApplyButton(anResetBtn)
+    end
+
+    local function refreshAnMessages()
+        local msgs = Database:GetGlobalConfigOrDefault("announceMessages", AN_DEFAULTS)
+        anWarnEdit:SetText(msgs.warning or AN_DEFAULTS.warning)
+        anAuctionEdit:SetText(msgs.auction or AN_DEFAULTS.auction)
+    end
+    panel:HookScript("OnShow", refreshAnMessages)
+
+    -- ====== autoClear 체크박스 (경매 시작 메시지 reset 아래) ======
     local autoClearCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    autoClearCheck:SetPoint("TOPLEFT", cdResetBtn, "BOTTOMLEFT", -6, -18)
+    autoClearCheck:SetPoint("TOPLEFT", anResetBtn, "BOTTOMLEFT", -6, -18)
     autoClearCheck:SetSize(22, 22)
     makeDivider(autoClearCheck)
     local autoClearLbl = autoClearCheck:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -723,7 +803,7 @@ RegEvent("ADDON_LOADED", function()
     end)
 
     -- ====== 자동 캡처 블랙리스트 UI (autoClear 아래) ======
-    local blHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local blHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     blHeader:SetPoint("TOPLEFT", autoClearCheck, "BOTTOMLEFT", 6, -22)
     blHeader:SetText("자동 캡처 차단 목록")
     makeDivider(blHeader)
@@ -744,10 +824,17 @@ RegEvent("ADDON_LOADED", function()
     addEdit:SetMaxLetters(120)
     addEdit:SetScript("OnEscapePressed", addEdit.ClearFocus)
 
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyEditBox then
+        ADDONSELF.theme:ApplyEditBox(addEdit)
+    end
+
     local addBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     addBtn:SetPoint("LEFT", addEdit, "RIGHT", 8, 0)
     addBtn:SetSize(60, 22)
     addBtn:SetText("추가")
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyButton then
+        ADDONSELF.theme:ApplyButton(addBtn)
+    end
 
     local listLbl = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     listLbl:SetPoint("TOPLEFT", addEdit, "BOTTOMLEFT", -8, -12)
@@ -756,18 +843,25 @@ RegEvent("ADDON_LOADED", function()
     local listBg = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     listBg:SetPoint("TOPLEFT", listLbl, "BOTTOMLEFT", 6, -4)
     listBg:SetSize(450, 110)
-    listBg:SetBackdrop({
-        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        edgeSize = 12, tile = false,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 },
-    })
-    listBg:SetBackdropColor(0, 0, 0, 0.45)
-    listBg:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyFrame then
+        ADDONSELF.theme:ApplyFrame(listBg)
+    else
+        listBg:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            edgeSize = 12, tile = false,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 },
+        })
+        listBg:SetBackdropColor(0, 0, 0, 0.45)
+        listBg:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+    end
 
     local blScrollFrame = CreateFrame("ScrollFrame", nil, listBg, "UIPanelScrollFrameTemplate")
     blScrollFrame:SetPoint("TOPLEFT", 6, -6)
     blScrollFrame:SetPoint("BOTTOMRIGHT", -28, 6)
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyScrollBar then
+        ADDONSELF.theme:ApplyScrollBar(blScrollFrame.ScrollBar)
+    end
 
     local blScrollChild = CreateFrame("Frame", nil, blScrollFrame)
     blScrollChild:SetSize(1, 1)
@@ -793,6 +887,9 @@ RegEvent("ADDON_LOADED", function()
         row.del:SetSize(22, 20)
         row.del:SetPoint("RIGHT", row, "RIGHT", 0, 0)
         row.del:SetText("X")
+        if ADDONSELF.theme and ADDONSELF.theme.ApplyButton then
+            ADDONSELF.theme:ApplyButton(row.del)
+        end
 
         rows[i] = row
         return row
@@ -850,6 +947,9 @@ RegEvent("ADDON_LOADED", function()
         Database:GetItemBlacklist()  -- 다시 호출하면 기본값 재주입됨
         rebuildBlacklist()
     end)
+    if ADDONSELF.theme and ADDONSELF.theme.ApplyButton then
+        ADDONSELF.theme:ApplyButton(resetBtn)
+    end
 
     panel:HookScript("OnShow", rebuildBlacklist)
 
