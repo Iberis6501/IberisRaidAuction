@@ -194,6 +194,9 @@ local function TryManualAddFromItemHyperlink(itemLink)
     end
 end
 
+-- 본섭(신 컨테이너 UI)은 ContainerFrameItemButton_OnModifiedClick가 삭제됨.
+-- 가방 클릭 연동은 클래식 계열 전용 — 본섭에서는 하이퍼링크(SetItemRef) 경로만 동작.
+if type(ContainerFrameItemButton_OnModifiedClick) == "function" then
 hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self, button)
     if button ~= "LeftButton" then return end
 
@@ -227,6 +230,7 @@ hooksecurefunc("ContainerFrameItemButton_OnModifiedClick", function(self, button
         end
     end
 end)
+end
 
 -- +아이템: 채팅·AtlasLoot 등 아이템 하이퍼링크 (Shift+좌클릭)
 hooksecurefunc("SetItemRef", function(link, text, button)
